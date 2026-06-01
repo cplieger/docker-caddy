@@ -1,0 +1,23 @@
+services:
+  caddy:
+    image: ghcr.io/cplieger/docker-caddy:latest
+    container_name: caddy
+    restart: unless-stopped
+
+    environment:
+      CLOUDFLARE_API_TOKEN: "your-cloudflare-api-token" # used by the DNS-01 plugin
+      CROWDSEC_BOUNCER_KEY: "your-crowdsec-bouncer-key" # used by the CrowdSec bouncer
+
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    cap_add:
+      - NET_BIND_SERVICE
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+
+volumes:
+  caddy_data:
