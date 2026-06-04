@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --with github.com/caddy-dns/cloudflare@v0.2.4 \
     --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.12.1
 
-FROM caddy:2.11@sha256:a22e108570bde2bf9ca3e584bc7d5bb94f9555e9e17353242e6ec4505ff4880d
+FROM caddy:2.11@sha256:cb9d71ad83182011b79355cd57692686374bd78d6fe327efe0ff8507da03ab13
 
 COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
 # Default healthcheck; private homelab compose overrides with tighter
