@@ -13,8 +13,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM caddy:2.11@sha256:cb9d71ad83182011b79355cd57692686374bd78d6fe327efe0ff8507da03ab13
 
 COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
-# Default healthcheck; private homelab compose overrides with tighter
-# timing (15s/5s/5/30s) for VRRP failover detection.
+# Default healthcheck; override the interval/timeout/retries in your
+# own compose if you want tighter detection windows.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
     CMD wget -q --spider http://127.0.0.1:80/health || exit 1
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
