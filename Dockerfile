@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --with github.com/caddy-dns/cloudflare@v0.2.4 \
     --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.12.1
 
-FROM caddy:2.11@sha256:cb9d71ad83182011b79355cd57692686374bd78d6fe327efe0ff8507da03ab13
+FROM caddy:2.11@sha256:cfeb0b281bc44a5a51fecde39e9e577c60d863c0b6196e6bbdf58fd00960887f
 
 COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
 # Default healthcheck; override the interval/timeout/retries in your
