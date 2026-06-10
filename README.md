@@ -26,6 +26,8 @@ The base is upstream's official `caddy:2.11` image, so all of Caddy's standard f
 
 ## Quick start
 
+Available from both `ghcr.io/cplieger/docker-caddy` and `docker.io/cplieger/docker-caddy` — identical images and tags.
+
 ```yaml
 services:
   caddy:
