@@ -127,6 +127,8 @@ Source: [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare)
 
 Adds a CrowdSec HTTP bouncer that queries the CrowdSec Local API on every request and blocks IPs in the active decision list. CrowdSec scenarios (HTTP probes, scrapers, brute-force) trigger decisions that this bouncer enforces at the proxy layer.
 
+> **Enforcement-only.** The bouncer pulls the active decision list from the CrowdSec LAPI (a lightweight cached stream) and blocks IPs. It does not run the CrowdSec engine, generate alerts, or touch the engine's database — so a healthy bouncer does not imply CrowdSec is detecting anything. The engine and its database (which, on SQLite, must run with `use_wal: true` or LAPI queries serialize and time out under bouncer-stream load) are a separate, server-side concern.
+
 Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer)
 
 ## Security
