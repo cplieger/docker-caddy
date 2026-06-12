@@ -22,7 +22,7 @@ The base is upstream's official Caddy image, so all of Caddy's standard features
 
 - **Built from the official builder** — uses Caddy builder so the binary, ld-paths, and runtime layout match upstream Caddy exactly. No drift from the official image.
 - **Plugins pinned to specific versions** — `caddy-dns/cloudflare` and `hslatman/caddy-crowdsec-bouncer` are tracked by Renovate and updated via dependency PRs.
-- **Multi-arch native cross-compilation** — `xcaddy build GOOS=$TARGETOS GOARCH=$TARGETARCH` produces native amd64 and arm64 binaries; no QEMU needed.
+- **Multi-arch, built natively** — CI builds each architecture on its own native runner (amd64 + arm64), so `xcaddy` compiles on matching hardware. No QEMU emulation and no buildx cross-compile build args.
 - **Watch mode enabled by default** — `caddy run --watch` reloads the Caddyfile on change without restarting the container.
 
 ## Quick start
