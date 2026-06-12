@@ -16,11 +16,11 @@ Caddy is a modern, automatic-HTTPS reverse proxy and web server. This image rebu
 - **Issue ACME certificates via Cloudflare DNS-01** — for wildcard certs (e.g. `*.example.com`) and for internal-only services that aren't reachable from the public internet (no HTTP-01 / TLS-ALPN-01 ports needed).
 - **Block IPs flagged by CrowdSec** — community-driven threat intel applied at the reverse-proxy layer, before requests reach your backends.
 
-The base is upstream's official `caddy:2.11` image, so all of Caddy's standard features work as documented (HTTP/3, on-demand TLS, automatic HTTPS, file server, FastCGI/php-fpm, WebSocket proxying, etc.).
+The base is upstream's official Caddy image, so all of Caddy's standard features work as documented (HTTP/3, on-demand TLS, automatic HTTPS, file server, FastCGI/php-fpm, WebSocket proxying, etc.).
 
 ### Why this design
 
-- **Built from the official builder** — uses `caddy:2.11-builder` so the binary, ld-paths, and runtime layout match upstream Caddy exactly. No drift from the official image.
+- **Built from the official builder** — uses Caddy builder so the binary, ld-paths, and runtime layout match upstream Caddy exactly. No drift from the official image.
 - **Plugins pinned to specific versions** — `caddy-dns/cloudflare` and `hslatman/caddy-crowdsec-bouncer` are tracked by Renovate and updated via dependency PRs.
 - **Multi-arch native cross-compilation** — `xcaddy build GOOS=$TARGETOS GOARCH=$TARGETARCH` produces native amd64 and arm64 binaries; no QEMU needed.
 - **Watch mode enabled by default** — `caddy run --watch` reloads the Caddyfile on change without restarting the container.
@@ -138,7 +138,7 @@ Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crow
 |------|--------|
 | [hadolint](https://github.com/hadolint/hadolint) | Clean |
 | [gitleaks](https://github.com/gitleaks/gitleaks) | No secrets detected |
-| [trivy](https://trivy.dev/) | Inherits Caddy 2.11 base image scan |
+| [trivy](https://trivy.dev/) | Inherits Caddy base image scan |
 
 The image is published with [cosign](https://github.com/sigstore/cosign) signatures and SBOM attestations. Verify a pull:
 
@@ -152,12 +152,12 @@ cosign verify ghcr.io/cplieger/docker-caddy:latest \
 
 All dependencies are updated automatically via [Renovate](https://github.com/renovatebot/renovate) and pinned by digest or version for reproducibility.
 
-| Dependency | Version | Source |
-|------------|---------|--------|
-| caddy (builder) | `2.11-builder` | [Docker Hub](https://hub.docker.com/_/caddy) |
-| caddy (runtime) | `2.11` | [Docker Hub](https://hub.docker.com/_/caddy) |
-| caddy-dns/cloudflare | `v0.2.4` | [GitHub](https://github.com/caddy-dns/cloudflare) |
-| caddy-crowdsec-bouncer | `v0.12.1` | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer) |
+| Dependency | Source |
+|------------|--------|
+| caddy (builder) | [Docker Hub](https://hub.docker.com/_/caddy) |
+| caddy (runtime) | [Docker Hub](https://hub.docker.com/_/caddy) |
+| caddy-dns/cloudflare | [GitHub](https://github.com/caddy-dns/cloudflare) |
+| caddy-crowdsec-bouncer | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer) |
 
 ## Credits
 
