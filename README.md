@@ -49,10 +49,7 @@ services:
 
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-
-volumes:
-  caddy_data:
+      - ./data:/data
 ```
 
 A minimal Caddyfile that uses both plugins:
@@ -103,15 +100,24 @@ Caddy reads its full config from the Caddyfile; environment variables are only u
 
 ## Healthcheck
 
-The built-in healthcheck hits `http://127.0.0.1:80/health` with BusyBox `wget`. The image bundles a default healthcheck (`30s/5s/3 retries/15s start_period`); override the timing in your compose if you want tighter detection windows.
+The image ships a **liveness** healthcheck (`30s/5s/3 retries/15s start_period`): BusyBox `wget` probes Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up and its config is loaded, and it works out of the box for **any** Caddyfile — no route configuration required.
 
-You'll need a matching `respond /health 200` line in your Caddyfile (or a route that returns 200 at `/health`):
+For an **end-to-end** check that verifies the proxy is actually serving traffic (listener bound, routing works), override the healthcheck to probe a `/health` route. The bundled [`Caddyfile.example`](./Caddyfile.example) serves one on plaintext `:80`:
 
 ```caddy
-:80 {
+http://:80 {
     respond /health 200
 }
 ```
+
+It must live in an explicit `http://:80` block — Caddy auto-redirects `:80` → `:443` for HTTPS site blocks, so a `/health` route inside one would 308 rather than answer over plaintext. Then override in your compose:
+
+```yaml
+healthcheck:
+  test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
+```
+
+Override the timing in your compose for tighter detection windows regardless of which probe you use.
 
 ## Plugins
 

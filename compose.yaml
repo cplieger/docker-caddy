@@ -5,19 +5,28 @@ services:
     restart: unless-stopped
 
     environment:
-      CLOUDFLARE_API_TOKEN: "your-cloudflare-api-token" # used by the DNS-01 plugin
-      CROWDSEC_BOUNCER_KEY: "your-crowdsec-bouncer-key" # used by the CrowdSec bouncer
+      CLOUDFLARE_API_TOKEN: "your-cloudflare-api-token"  # used by the DNS-01 plugin
+      CROWDSEC_BOUNCER_KEY: "your-crowdsec-bouncer-key"  # used by the CrowdSec bouncer
 
     ports:
       - "80:80"
       - "443:443"
-      - "443:443/udp" # HTTP/3
+      - "443:443/udp"  # HTTP/3
+    # Caddy binds privileged ports 80/443; NET_BIND_SERVICE grants that
+    # without running the container as root from the host's perspective.
     cap_add:
       - NET_BIND_SERVICE
 
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
+    # The image ships a liveness healthcheck (probes Caddy's admin API; works
+    # with any Caddyfile). For an end-to-end check that the proxy is actually
+    # serving, use Caddyfile.example (it answers /health on :80) and uncomment:
+    # healthcheck:
+    #   test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
 
-volumes:
-  caddy_data:
+    volumes:
+      # Mount your Caddyfile here. Start from the repo's Caddyfile.example:
+      #   cp Caddyfile.example Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Persist issued certs + ACME state (bind mount). Create ./data first:
+      #   mkdir -p data
+      - ./data:/data
