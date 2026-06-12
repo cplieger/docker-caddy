@@ -6,7 +6,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     xcaddy build \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
-        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.12.1
+        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.13.1
 
 FROM caddy:2.11@sha256:cfeb0b281bc44a5a51fecde39e9e577c60d863c0b6196e6bbdf58fd00960887f
 
