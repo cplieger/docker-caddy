@@ -5,3 +5,7 @@
 **/.code-review/
 **/.refactor/
 **/.steering-maintenance/
+
+# Local copies created when running the example (see Caddyfile.example / compose.yaml)
+/Caddyfile
+/data/

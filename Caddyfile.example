@@ -1,0 +1,32 @@
+# Minimal example Caddyfile for ghcr.io/cplieger/docker-caddy.
+#
+# Usage: copy this file to `Caddyfile` (the name compose.yaml mounts at
+# /etc/caddy/Caddyfile), then edit it for your sites:
+#     cp Caddyfile.example Caddyfile
+#
+# Healthcheck note: the image's built-in healthcheck only probes Caddy's
+# admin API (liveness — "is Caddy up"). For an end-to-end check that verifies
+# the proxy actually serves traffic, the `http://:80` block below answers
+# /health over plaintext; override the healthcheck in compose.yaml to hit it:
+#     healthcheck:
+#       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
+# /health must live in an explicit `http://:80` block: Caddy auto-redirects
+# :80 -> :443 for HTTPS site blocks, so a /health route inside one would 308
+# rather than answer over plaintext, and the probe would fail.
+http://:80 {
+	respond /health 200
+}
+
+# Example HTTPS site using the bundled plugins. Uncomment and adapt.
+# example.com {
+# 	# Cloudflare DNS-01 challenge (needs CLOUDFLARE_API_TOKEN in the env).
+# 	tls {
+# 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+# 	}
+#
+# 	# CrowdSec bouncer (needs CROWDSEC_BOUNCER_KEY in the env). Configure the
+# 	# LAPI connection in global options and enable the handler per-site; see
+# 	# https://github.com/hslatman/caddy-crowdsec-bouncer for the exact syntax.
+#
+# 	reverse_proxy 192.168.1.10:8080
+# }
