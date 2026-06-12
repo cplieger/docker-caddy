@@ -1,10 +1,12 @@
 # docker-caddy
 
-![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)
+[![CI](https://github.com/cplieger/docker-caddy/actions/workflows/ci.yaml/badge.svg)](https://github.com/cplieger/docker-caddy/actions/workflows/ci.yaml)
 [![GitHub release](https://img.shields.io/github/v/release/cplieger/docker-caddy)](https://github.com/cplieger/docker-caddy/releases)
 [![Image Size](https://ghcr-badge.egpl.dev/cplieger/docker-caddy/size)](https://github.com/cplieger/docker-caddy/pkgs/container/docker-caddy)
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue)
-![base: Caddy 2.11](https://img.shields.io/badge/base-Caddy_2.11-1F88C0?logo=caddy)
+![base: Caddy](https://img.shields.io/badge/base-Caddy-1F88C0?logo=caddy)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/docker-caddy/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/docker-caddy)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
 [Caddy](https://caddyserver.com/) reverse proxy and web server, custom-built with [`xcaddy`](https://github.com/caddyserver/xcaddy) to bundle the Cloudflare DNS-01 plugin and the CrowdSec HTTP bouncer.
 
