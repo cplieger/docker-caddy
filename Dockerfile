@@ -8,9 +8,23 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
         --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.13.1
 
+# ---------------------------------------------------------------------------
+# Test stage — runs the build-time smoke test against the freshly built binary:
+# both bundled plugins must be compiled in (the xcaddy failure mode) and the
+# shipped example Caddyfile must validate. A failure here fails the centralized
+# `ci / validate` docker build gate, because the final stage depends on this
+# stage's marker.
+# ---------------------------------------------------------------------------
+FROM builder AS test
+COPY tests/ /tmp/tests/
+COPY Caddyfile.example /tmp/tests/Caddyfile.example
+RUN sh /tmp/tests/smoke.sh && touch /tests-passed
+
 FROM caddy:2.11@sha256:cfeb0b281bc44a5a51fecde39e9e577c60d863c0b6196e6bbdf58fd00960887f
 
 COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
+# Force the test stage to build and pass before the runtime image is produced.
+COPY --from=test /tests-passed /tests-passed
 # Liveness probe against Caddy's admin API (enabled by default on
 # 127.0.0.1:2019), so the image is healthy out of the box for ANY Caddyfile.
 # For an end-to-end check that verifies the proxy actually serves traffic,
