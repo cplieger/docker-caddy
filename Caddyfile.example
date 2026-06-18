@@ -13,6 +13,18 @@
 # /health must live in an explicit `http://:80` block: Caddy auto-redirects
 # :80 -> :443 for HTTPS site blocks, so a /health route inside one would 308
 # rather than answer over plaintext, and the probe would fail.
+
+# Global options.
+{
+	# Lock Caddy's admin API (config read/write) to loopback inside the
+	# container. The default bind is 0.0.0.0:2019, which exposes config
+	# read/write to any container on the proxy network. Do NOT set the
+	# CADDY_ADMIN env var on the service — it overrides this directive.
+	# The image healthcheck probes 127.0.0.1:2019, so this keeps the probe
+	# working while locking the admin API to loopback.
+	admin localhost:2019
+}
+
 http://:80 {
 	respond /health 200
 }

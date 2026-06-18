@@ -10,3 +10,6 @@
 # Local copies created when running the example (see Caddyfile.example / compose.yaml)
 /Caddyfile
 /data/
+
+# Local secrets for the compose example (CLOUDFLARE_API_TOKEN / CROWDSEC_BOUNCER_KEY)
+.env

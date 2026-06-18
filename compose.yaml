@@ -5,8 +5,10 @@ services:
     restart: unless-stopped
 
     environment:
-      CLOUDFLARE_API_TOKEN: "your-cloudflare-api-token"  # used by the DNS-01 plugin
-      CROWDSEC_BOUNCER_KEY: "your-crowdsec-bouncer-key"  # used by the CrowdSec bouncer
+      # Provide these via a gitignored .env file (compose reads it automatically) or a
+      # secrets manager — never commit live tokens into this file.
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:?set in .env}"  # used by the DNS-01 plugin
+      CROWDSEC_BOUNCER_KEY: "${CROWDSEC_BOUNCER_KEY:?set in .env}"  # used by the CrowdSec bouncer
 
     ports:
       - "80:80"
@@ -18,8 +20,10 @@ services:
       - NET_BIND_SERVICE
 
     # The image ships a liveness healthcheck (probes Caddy's admin API; works
-    # with any Caddyfile). For an end-to-end check that the proxy is actually
-    # serving, use Caddyfile.example (it answers /health on :80) and uncomment:
+    # with any Caddyfile). Use this end-to-end override when you want to verify
+    # the proxy is actually serving, OR if your Caddyfile sets `admin off` /
+    # rebinds the admin endpoint (which breaks the default probe). It answers
+    # /health on :80 via Caddyfile.example:
     # healthcheck:
     #   test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
 
