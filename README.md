@@ -37,8 +37,10 @@ services:
     restart: unless-stopped
 
     environment:
-      CLOUDFLARE_API_TOKEN: "your-cloudflare-api-token"   # used by the DNS-01 plugin
-      CROWDSEC_BOUNCER_KEY: "your-crowdsec-bouncer-key"   # used by the CrowdSec bouncer
+      # Provide these via a gitignored .env file (compose reads it automatically)
+      # or a secrets manager — never commit live tokens into this file.
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:?set in .env}"   # used by the DNS-01 plugin
+      CROWDSEC_BOUNCER_KEY: "${CROWDSEC_BOUNCER_KEY:?set in .env}"   # used by the CrowdSec bouncer
 
     ports:
       - "80:80"
@@ -52,10 +54,23 @@ services:
       - ./data:/data
 ```
 
+Create a gitignored `.env` next to `compose.yaml` with your real values (compose
+loads it automatically):
+
+```sh
+cat > .env <<'EOF'
+CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+CROWDSEC_BOUNCER_KEY=your-crowdsec-bouncer-key
+EOF
+```
+
 A minimal Caddyfile that uses both plugins:
 
 ```caddy
 {
+    # Lock the admin API (config read/write) to loopback inside the container.
+    admin localhost:2019
+
     crowdsec {
         api_url http://crowdsec:8080
         api_key {env.CROWDSEC_BOUNCER_KEY}
@@ -71,36 +86,40 @@ A minimal Caddyfile that uses both plugins:
 }
 ```
 
+The `admin localhost:2019` directive keeps Caddy's admin API on loopback (the default bind is `0.0.0.0:2019`, which exposes config read/write to any container on the proxy network); do not set the `CADDY_ADMIN` env var on the compose service, as it overrides this directive.
+
 ## Configuration reference
 
 ### Environment variables
 
 Caddy reads its full config from the Caddyfile; environment variables are only used inside the Caddyfile via `{env.VAR}` substitutions. Common ones:
 
-| Variable | Used by | Description |
-|----------|---------|-------------|
-| `CLOUDFLARE_API_TOKEN` | `caddy-dns/cloudflare` | API token with `Zone:Zone:Read` + `Zone:DNS:Edit` for the zones you serve |
-| `CROWDSEC_BOUNCER_KEY` | `caddy-crowdsec-bouncer` | Bouncer API key (generate with `cscli bouncers add caddy`) |
+| Variable               | Used by                  | Description                                                               |
+| ---------------------- | ------------------------ | ------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN` | `caddy-dns/cloudflare`   | API token with `Zone:Zone:Read` + `Zone:DNS:Edit` for the zones you serve |
+| `CROWDSEC_BOUNCER_KEY` | `caddy-crowdsec-bouncer` | Bouncer API key (generate with `cscli bouncers add caddy`)                |
 
 ### Volumes
 
-| Mount | Description |
-|-------|-------------|
-| `/etc/caddy/Caddyfile` | Your Caddyfile (read-only is fine; `--watch` watches for changes) |
-| `/data` | Caddy's data directory — issued certificates, ACME state, plugin storage. **Persist this** or you'll re-issue certs on every restart. |
-| `/config` | (optional) Caddy's auto-generated JSON config and persistent state |
+| Mount                  | Description                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `/etc/caddy/Caddyfile` | Your Caddyfile (read-only is fine; `--watch` watches for changes)                                                                     |
+| `/data`                | Caddy's data directory — issued certificates, ACME state, plugin storage. **Persist this** or you'll re-issue certs on every restart. |
+| `/config`              | (optional) Caddy's auto-generated JSON config and persistent state                                                                    |
 
 ### Ports
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| `80` | TCP | HTTP — used for HTTP-01 challenges and redirects to HTTPS |
-| `443` | TCP | HTTPS / HTTP/2 |
-| `443` | UDP | HTTP/3 (QUIC) |
+| Port  | Protocol | Purpose                                                   |
+| ----- | -------- | --------------------------------------------------------- |
+| `80`  | TCP      | HTTP — used for HTTP-01 challenges and redirects to HTTPS |
+| `443` | TCP      | HTTPS / HTTP/2                                            |
+| `443` | UDP      | HTTP/3 (QUIC)                                             |
 
 ## Healthcheck
 
 The image ships a **liveness** healthcheck (`30s/5s/3 retries/15s start_period`): BusyBox `wget` probes Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up and its config is loaded, and it works out of the box for **any** Caddyfile — no route configuration required.
+
+> **Note:** the default probe hits Caddy's admin API. If your Caddyfile sets `admin off` or rebinds the admin endpoint, this probe fails even though Caddy is serving normally — switch to the end-to-end `/health` override below in that case.
 
 For an **end-to-end** check that verifies the proxy is actually serving traffic (listener bound, routing works), override the healthcheck to probe a `/health` route. The bundled [`Caddyfile.example`](./Caddyfile.example) serves one on plaintext `:80`:
 
@@ -140,11 +159,11 @@ Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crow
 
 ## Security
 
-| Tool | Result |
-|------|--------|
-| [hadolint](https://github.com/hadolint/hadolint) | Clean |
-| [gitleaks](https://github.com/gitleaks/gitleaks) | No secrets detected |
-| [trivy](https://trivy.dev/) | Inherits Caddy base image scan |
+| Tool                                             | Result                         |
+| ------------------------------------------------ | ------------------------------ |
+| [hadolint](https://github.com/hadolint/hadolint) | Clean                          |
+| [gitleaks](https://github.com/gitleaks/gitleaks) | No secrets detected            |
+| [trivy](https://trivy.dev/)                      | Inherits Caddy base image scan |
 
 The image is published with [cosign](https://github.com/sigstore/cosign) signatures and SBOM attestations. Verify a pull:
 
@@ -158,11 +177,11 @@ cosign verify ghcr.io/cplieger/docker-caddy:latest \
 
 All dependencies are updated automatically via [Renovate](https://github.com/renovatebot/renovate) and pinned by digest or version for reproducibility.
 
-| Dependency | Source |
-|------------|--------|
-| caddy (builder) | [Docker Hub](https://hub.docker.com/_/caddy) |
-| caddy (runtime) | [Docker Hub](https://hub.docker.com/_/caddy) |
-| caddy-dns/cloudflare | [GitHub](https://github.com/caddy-dns/cloudflare) |
+| Dependency             | Source                                                       |
+| ---------------------- | ------------------------------------------------------------ |
+| caddy (builder)        | [Docker Hub](https://hub.docker.com/_/caddy)                 |
+| caddy (runtime)        | [Docker Hub](https://hub.docker.com/_/caddy)                 |
+| caddy-dns/cloudflare   | [GitHub](https://github.com/caddy-dns/cloudflare)            |
 | caddy-crowdsec-bouncer | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer) |
 
 ## Credits
