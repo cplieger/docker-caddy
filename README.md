@@ -20,7 +20,7 @@ The base is upstream's official Caddy image, so all of Caddy's standard features
 
 ### Why this design
 
-- **Built from the official builder** — uses Caddy builder so the binary, ld-paths, and runtime layout match upstream Caddy exactly. No drift from the official image.
+- **Built from the official builder** — uses Caddy builder so the binary, ld-paths, and runtime layout match upstream Caddy exactly. The only addition is an `apk upgrade` of the runtime base, so OS security patches land without waiting for upstream to rebuild.
 - **Plugins pinned to specific versions** — `caddy-dns/cloudflare` and `hslatman/caddy-crowdsec-bouncer` are tracked by Renovate and updated via dependency PRs.
 - **Multi-arch, built natively** — CI builds each architecture on its own native runner (amd64 + arm64), so `xcaddy` compiles on matching hardware. No QEMU emulation and no buildx cross-compile build args.
 - **Watch mode enabled by default** — `caddy run --watch` reloads the Caddyfile on change without restarting the container.
@@ -159,11 +159,13 @@ Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crow
 
 ## Security
 
-| Tool                                             | Result                         |
-| ------------------------------------------------ | ------------------------------ |
-| [hadolint](https://github.com/hadolint/hadolint) | Clean                          |
-| [gitleaks](https://github.com/gitleaks/gitleaks) | No secrets detected            |
-| [trivy](https://trivy.dev/)                      | Inherits Caddy base image scan |
+| Tool                                             | Result                                           |
+| ------------------------------------------------ | ------------------------------------------------ |
+| [hadolint](https://github.com/hadolint/hadolint) | Clean                                            |
+| [gitleaks](https://github.com/gitleaks/gitleaks) | No secrets detected                              |
+| [trivy](https://trivy.dev/)                      | Clean (runtime base apk-upgraded for OS patches) |
+
+Two transitive Go-module CVEs still surface in scans (`CVE-2026-44982` in CrowdSec, `CVE-2026-2303` in mongo-driver), but neither is reachable in this build: the bundled bouncer links only CrowdSec's LAPI client, so the vulnerable AppSec body parser and the MongoDB GSSAPI bindings are never compiled in. They clear once the upstream bouncer plugin supports CrowdSec 1.7.8+.
 
 The image is published with [cosign](https://github.com/sigstore/cosign) signatures and SBOM attestations. Verify a pull:
 
