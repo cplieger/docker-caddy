@@ -22,6 +22,13 @@ RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 
 FROM caddy:2.11@sha256:cfeb0b281bc44a5a51fecde39e9e577c60d863c0b6196e6bbdf58fd00960887f
 
+# Patch the runtime base's OS packages for Alpine security fixes that upstream's
+# caddy image has not rebuilt for yet (notably openssl libssl3/libcrypto3). Caddy
+# is a static Go binary and never links OpenSSL, but the packages ship in the base
+# and are flagged by image scanners; upgrading keeps the published image clean.
+# hadolint ignore=DL3017
+RUN apk upgrade --no-cache
+
 COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
 # Force the test stage to build and pass before the runtime image is produced.
 COPY --from=test /tests-passed /tests-passed
