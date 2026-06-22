@@ -20,7 +20,7 @@ COPY tests/ /tmp/tests/
 COPY Caddyfile.example /tmp/tests/Caddyfile.example
 RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 
-FROM caddy:2.11@sha256:cfeb0b281bc44a5a51fecde39e9e577c60d863c0b6196e6bbdf58fd00960887f
+FROM caddy:2.11@sha256:597f813aa60873d4c8148c816fbc4507d496ab160d620460279557f58ee3d0b9
 
 # Patch the runtime base's OS packages for Alpine security fixes that upstream's
 # caddy image has not rebuilt for yet (notably openssl libssl3/libcrypto3). Caddy
