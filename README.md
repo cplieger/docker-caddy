@@ -46,8 +46,6 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"   # HTTP/3
-    cap_add:
-      - NET_BIND_SERVICE
 
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -114,6 +112,16 @@ Caddy reads its full config from the Caddyfile; environment variables are only u
 | `80`  | TCP      | HTTP — used for HTTP-01 challenges and redirects to HTTPS |
 | `443` | TCP      | HTTPS / HTTP/2                                            |
 | `443` | UDP      | HTTP/3 (QUIC)                                             |
+
+### Running unprivileged
+
+The image runs as **root** by default (the upstream Caddy default), so root binds ports 80 and 443 natively and the example needs no extra capability for them.
+
+To run Caddy as a non-root user instead:
+
+- set `user: "<uid>:<gid>"` on the service,
+- add `cap_add: [NET_BIND_SERVICE]` so the unprivileged process may bind the low ports,
+- `chown` the `/data` host directory to that UID (Caddy writes certs and ACME state there).
 
 ## Healthcheck
 
