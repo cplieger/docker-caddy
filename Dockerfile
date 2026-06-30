@@ -26,8 +26,14 @@ FROM caddy:2.11@sha256:af5fdcd76f2db5e4e974ee92f96ee8c0fc3edb55bd4ba5032547cbf3f
 # caddy image has not rebuilt for yet (notably openssl libssl3/libcrypto3). Caddy
 # is a static Go binary and never links OpenSSL, but the packages ship in the base
 # and are flagged by image scanners; upgrading keeps the published image clean.
+#
+# tzdata: the upstream caddy:2.11 Alpine base ships no zoneinfo, and the
+# xcaddy-built binary dropped Go's embedded tz database, so the TZ env var
+# (e.g. TZ=Europe/Paris) is silently ignored without it. Installing tzdata
+# makes TZ honored for log timestamps and time-based config.
 # hadolint ignore=DL3017
-RUN apk upgrade --no-cache
+RUN apk upgrade --no-cache \
+    && apk add --no-cache tzdata
 
 COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
 # Force the test stage to build and pass before the runtime image is produced.
