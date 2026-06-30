@@ -1,6 +1,6 @@
 # docker-caddy
 
-[![Image Size](https://ghcr-badge.egpl.dev/cplieger/docker-caddy/size)](https://github.com/cplieger/docker-caddy/pkgs/container/docker-caddy)
+[![Image Size](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/docker-caddy/badges/size.json)](https://github.com/cplieger/docker-caddy/pkgs/container/docker-caddy)
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue)
 ![base: Caddy](https://img.shields.io/badge/base-Caddy-1F88C0?logo=caddy)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13203/badge)](https://www.bestpractices.dev/projects/13203)
