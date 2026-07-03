@@ -13,10 +13,10 @@
 
 Caddy is a modern, automatic-HTTPS reverse proxy and web server. This image rebuilds it from upstream's official builder with two extra plugins so you can:
 
-- **Issue ACME certificates via Cloudflare DNS-01** — for wildcard certs (e.g. `*.example.com`) and for internal-only services that aren't reachable from the public internet (no HTTP-01 / TLS-ALPN-01 ports needed).
+- **Issue ACME certificates via Cloudflare DNS-01** — for wildcard certs and internal-only services (see [Plugins](#plugins) for details).
 - **Block IPs flagged by CrowdSec** — community-driven threat intel applied at the reverse-proxy layer, before requests reach your backends.
 
-The base is upstream's official Caddy image, so all of Caddy's standard features work as documented (HTTP/3, on-demand TLS, automatic HTTPS, file server, FastCGI/php-fpm, WebSocket proxying, etc.).
+The base is upstream's official Caddy image, so all of Caddy's [standard features](https://caddyserver.com/docs/) work as documented.
 
 ### Why this design
 
@@ -209,7 +209,7 @@ Issues and pull requests are welcome. Please open an issue first for larger chan
 
 ## Disclaimer
 
-This image is built with care and follows security best practices, but it is intended for **homelab use**. No guarantees of fitness for production environments. Use at your own risk.
+This project is built with care and follows security best practices, but it is intended for personal / self-hosted use. No guarantees of fitness for production environments. Use at your own risk.
 
 This project was built with AI-assisted tooling using [Claude Opus](https://www.anthropic.com/claude) and [Kiro](https://kiro.dev). The human maintainer defines architecture, supervises implementation, and makes all final decisions.
 
