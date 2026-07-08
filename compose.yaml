@@ -17,5 +17,5 @@ services:
       - "443:443/udp"  # HTTP/3
 
     volumes:
-      - "./Caddyfile:/etc/caddy/Caddyfile:ro"  # start from the repo's Caddyfile.example
+      - "./Caddyfile:/etc/caddy/Caddyfile:ro"  # copy Caddyfile.example; it locks the admin API to loopback (do not set CADDY_ADMIN)
       - "./data:/data"  # persist issued certs + ACME state

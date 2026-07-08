@@ -14,22 +14,24 @@ set -eu
 d=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 caddy="${CADDY_BIN:-caddy}"
 fail=0
-log() { printf '%s\n' "$*"; }
+log() { printf '%s\n' "$*"; }     # progress + final verdict -> stdout
+err() { printf '%s\n' "$*" >&2; } # failures + captured output -> stderr
 
 # 1. The binary runs.
-if ! "$caddy" version > /dev/null 2>&1; then
-  log "FAIL: 'caddy version' did not run"
+if ! out=$("$caddy" version 2>&1); then
+  err "FAIL: 'caddy version' did not run"
+  err "$out"
   fail=1
 fi
 
 # 2. Both bundled plugins are actually compiled in (the xcaddy failure mode).
-mods=$("$caddy" list-modules 2> /dev/null || true)
-if ! printf '%s\n' "$mods" | grep -qi 'cloudflare'; then
-  log "FAIL: caddy-dns/cloudflare module is not compiled into the binary"
+mods=$("$caddy" list-modules 2>/dev/null || true)
+if ! printf '%s\n' "$mods" | grep -qE '^dns\.providers\.cloudflare[[:space:]]*$'; then
+  err "FAIL: dns.providers.cloudflare module is not compiled into the binary"
   fail=1
 fi
-if ! printf '%s\n' "$mods" | grep -qi 'crowdsec'; then
-  log "FAIL: caddy-crowdsec-bouncer module is not compiled into the binary"
+if ! printf '%s\n' "$mods" | grep -qE '^http\.handlers\.crowdsec[[:space:]]*$'; then
+  err "FAIL: http.handlers.crowdsec module is not compiled into the binary"
   fail=1
 fi
 
@@ -38,8 +40,9 @@ fi
 # (into tests/); for a local `sh tests/smoke.sh` run it lives at the repo root.
 example="$d/Caddyfile.example"
 [ -f "$example" ] || example="$d/../Caddyfile.example"
-if ! "$caddy" validate --adapter caddyfile --config "$example" > /dev/null 2>&1; then
-  log "FAIL: 'caddy validate' rejected Caddyfile.example"
+if ! out=$("$caddy" validate --adapter caddyfile --config "$example" 2>&1); then
+  err "FAIL: 'caddy validate' rejected Caddyfile.example"
+  err "$out"
   fail=1
 fi
 
