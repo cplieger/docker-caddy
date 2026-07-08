@@ -20,7 +20,7 @@ The base is upstream's official Caddy image, so all of Caddy's [standard feature
 
 ### Why this design
 
-- **Built from the official builder** — uses Caddy builder so the binary, ld-paths, and runtime layout match upstream Caddy exactly. The only addition is an `apk upgrade` of the runtime base, so OS security patches land without waiting for upstream to rebuild.
+- **Built from the official builder** — uses Caddy builder so the binary, ld-paths, and runtime layout match upstream Caddy exactly. The runtime base is `apk upgrade`d so OS security patches land without waiting for upstream to rebuild, gets `tzdata` added (the `xcaddy` build drops Go's embedded zoneinfo, so `TZ` needs it), and has the unused curl stack removed to shrink CVE surface.
 - **Plugins pinned to specific versions** — `caddy-dns/cloudflare` and `hslatman/caddy-crowdsec-bouncer` are tracked by Renovate and updated via dependency PRs.
 - **Multi-arch, built natively** — CI builds each architecture on its own native runner (amd64 + arm64), so `xcaddy` compiles on matching hardware. No QEMU emulation and no buildx cross-compile build args.
 - **Watch mode enabled by default** — `caddy run --watch` reloads the Caddyfile on change without restarting the container.
