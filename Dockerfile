@@ -33,13 +33,20 @@ FROM caddy:2.11@sha256:af5fdcd76f2db5e4e974ee92f96ee8c0fc3edb55bd4ba5032547cbf3f
 # makes TZ honored for log timestamps and time-based config.
 # hadolint ignore=DL3017
 RUN apk upgrade --no-cache \
-    && apk add --no-cache tzdata
+    && apk add --no-cache tzdata \
+    # Drop the curl stack (curl + its transitive libs): unused at runtime (the
+    # healthcheck uses BusyBox wget, caddy is a static Go binary) and a recurring
+    # image-scanner CVE source. The transitive list is hand-maintained; the
+    # test-stage marker gate catches breakage.
+    && apk del --no-cache curl libcurl c-ares nghttp2-libs libidn2 libpsl libunistring brotli-libs zstd-libs
 
 COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
 # Force the test stage to build and pass before the runtime image is produced.
 COPY --from=test /tests-passed /tests-passed
-# Liveness probe against Caddy's admin API (enabled by default on
-# 127.0.0.1:2019), so the image is healthy out of the box for ANY Caddyfile.
+# Liveness probe against Caddy's admin API on 127.0.0.1:2019. This is
+# route-independent while the admin API stays enabled at its default loopback
+# address; Caddyfiles that set `admin off` or rebind admin must override the
+# healthcheck to a route-level probe.
 # For an end-to-end check that verifies the proxy actually serves traffic,
 # override this in your compose to probe a /health route — see Caddyfile.example
 # and the README. Override the interval/timeout/retries there too.

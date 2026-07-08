@@ -25,7 +25,12 @@ if ! out=$("$caddy" version 2>&1); then
 fi
 
 # 2. Both bundled plugins are actually compiled in (the xcaddy failure mode).
-mods=$("$caddy" list-modules 2>/dev/null || true)
+if ! mods=$("$caddy" list-modules 2>&1); then
+  err "FAIL: 'caddy list-modules' did not run"
+  err "$mods"
+  fail=1
+  mods=""
+fi
 if ! printf '%s\n' "$mods" | grep -qE '^dns\.providers\.cloudflare[[:space:]]*$'; then
   err "FAIL: dns.providers.cloudflare module is not compiled into the binary"
   fail=1
@@ -43,6 +48,20 @@ example="$d/Caddyfile.example"
 if ! out=$("$caddy" validate --adapter caddyfile --config "$example" 2>&1); then
   err "FAIL: 'caddy validate' rejected Caddyfile.example"
   err "$out"
+  fail=1
+fi
+
+# 4. Negative control: a malformed Caddyfile MUST be rejected. Step 3 only
+#    proves 'caddy validate' accepts a good config; on its own that goes vacuous
+#    if validate ever no-ops or exits 0 without parsing. Asserting a non-zero
+#    exit on a broken config keeps the gate live and is wording-independent (it
+#    checks the exit code, not a specific adapter error string). An unclosed
+#    site block is a pure syntax error no caddy version can accept.
+bad=$(mktemp)
+trap 'rm -f "$bad"' EXIT
+printf '%s\n' ':80 {' >"$bad"
+if "$caddy" validate --adapter caddyfile --config "$bad" >/dev/null 2>&1; then
+  err "FAIL: 'caddy validate' accepted a malformed Caddyfile (vacuous gate?)"
   fail=1
 fi
 
