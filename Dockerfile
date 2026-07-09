@@ -1,5 +1,5 @@
 # check=error=true
-FROM caddy:2.11-builder@sha256:feb77c5a25fd44d448809bb4f108368a66f1899e61acb2f7f023d290423fe3e9 AS builder
+FROM caddy:2.11-builder@sha256:ffa8572dfe784332cce850b255926465b5a71c947af60e6b4b17bf6adca4fedb AS builder
 ENV GOTOOLCHAIN=auto
 
 RUN --mount=type=cache,target=/go/pkg/mod \
