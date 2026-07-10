@@ -123,6 +123,28 @@ To run Caddy as a non-root user instead:
 - add `cap_add: [NET_BIND_SERVICE]` so the unprivileged process may bind the low ports,
 - `chown` the `/data` host directory to that UID (Caddy writes certs and ACME state there).
 
+## Alerting
+
+These alerts fire on Caddy's own built-in Prometheus metrics, so you have to turn metrics on first. Add the `metrics` global option to your Caddyfile and keep the admin API enabled (it is on by default):
+
+```caddy
+{
+    metrics
+}
+```
+
+Caddy then serves the metrics at the admin API's `/metrics` endpoint (`http://localhost:2019/metrics` with the example's `admin localhost:2019`). The admin API is bound to loopback, so scrape it from inside the container's network namespace (for example a monitoring sidecar) or expose it on a routable listener with Caddy's [`metrics`](https://caddyserver.com/docs/caddyfile/directives/metrics) handler directive.
+
+The recommended rules live in [`alerts.yaml`](alerts.yaml); evaluate them with Prometheus or the Mimir ruler and route firing alerts through your Alertmanager. They cover:
+
+| Alert | Fires when | Severity |
+| --- | --- | --- |
+| `CaddyUpstreamUnhealthy` | a `reverse_proxy` upstream's health check reports it down for >5m | warning |
+| `CaddyConfigReloadFailed` | the last config reload was rejected, so the running config is stale | critical |
+| `CaddyHigh5xxRate` | more than 5% of responses are 5xx over 10m (at >1 req/s) | warning |
+
+Thresholds and the `severity` labels are starting points; add your scrape `job` label to the selectors if you scrape more than one instance, and route by whatever labels your Alertmanager uses.
+
 ## Healthcheck
 
 The image ships a **liveness** healthcheck (`30s/5s/3 retries/15s start_period`): BusyBox `wget` probes Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up and its config is loaded, and it works out of the box for **any** Caddyfile — no route configuration required.

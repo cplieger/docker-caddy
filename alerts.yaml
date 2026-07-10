@@ -1,0 +1,48 @@
+# Recommended alert rules for docker-caddy. Prometheus / Mimir ruler (PromQL)
+# rule group. These fire on Caddy's own built-in Prometheus metrics, so Caddy's
+# metrics must be enabled first: add the `metrics` global option to the Caddyfile
+# and keep the admin API on. Caddy then serves them at the admin API's /metrics
+# endpoint (http://localhost:2019/metrics by default). Scrape that with
+# Prometheus or the Mimir ruler; firing alerts deliver through your Alertmanager.
+# Thresholds, `for:` windows, and the severity labels are starting points; adjust
+# them to your deployment. The scrape `job` label is yours to set, so it is
+# intentionally left out of the selectors.
+groups:
+  - name: caddy
+    rules:
+      - alert: CaddyUpstreamUnhealthy
+        expr: caddy_reverse_proxy_upstreams_healthy == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Caddy upstream {{ $labels.upstream }} unhealthy"
+          description: >
+            Caddy's active health check reports {{ $labels.upstream }} as down
+            for >5m; the fronted service is likely failing. Cross-check the
+            backend container.
+      - alert: CaddyConfigReloadFailed
+        expr: caddy_config_last_reload_successful == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Caddy config reload failed"
+          description: >
+            caddy_config_last_reload_successful=0; the running config is stale /
+            the last reload was rejected. Validate the Caddyfile (caddy
+            validate) and check for a bad config reload.
+      - alert: CaddyHigh5xxRate
+        expr: >
+          sum by (hostname) (rate(caddy_http_response_duration_seconds_count{code=~"5.."}[5m]))
+          / sum by (hostname) (rate(caddy_http_response_duration_seconds_count[5m])) > 0.05
+          and sum by (hostname) (rate(caddy_http_response_duration_seconds_count[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Caddy 5xx rate >5%"
+          description: >
+            More than 5% of responses are 5xx over 10m (at >1 req/s). Indicates
+            upstream failures or a broken route; correlate with
+            CaddyUpstreamUnhealthy and the backend logs.
