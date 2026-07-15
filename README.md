@@ -220,14 +220,14 @@ cosign verify ghcr.io/cplieger/docker-caddy:latest \
 
 All dependencies are updated automatically via [Renovate](https://github.com/renovatebot/renovate) and pinned by digest or version for reproducibility.
 
-| Dependency                 | Source                                                       |
-| -------------------------- | ------------------------------------------------------------ |
-| caddy (builder)            | [Docker Hub](https://hub.docker.com/_/caddy)                 |
-| caddy (contract donor)     | [Docker Hub](https://hub.docker.com/_/caddy)                 |
-| distroless/static (runtime)| [gcr.io/distroless](https://github.com/GoogleContainerTools/distroless) |
-| caddy-dns/cloudflare       | [GitHub](https://github.com/caddy-dns/cloudflare)            |
-| caddy-crowdsec-bouncer     | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer) |
-| health (probe binary)      | [GitHub](https://github.com/cplieger/health)                 |
+| Dependency                  | Source                                                                   |
+| --------------------------- | ------------------------------------------------------------------------ |
+| caddy (builder)             | [Docker Hub](https://hub.docker.com/_/caddy)                             |
+| caddy (contract donor)      | [Docker Hub](https://hub.docker.com/_/caddy)                             |
+| distroless/static (runtime) | [gcr.io/distroless](https://github.com/GoogleContainerTools/distroless)  |
+| caddy-dns/cloudflare        | [GitHub](https://github.com/caddy-dns/cloudflare)                        |
+| caddy-crowdsec-bouncer      | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer)             |
+| health (probe binary)       | [GitHub](https://github.com/cplieger/health)                             |
 
 ## Credits
 
