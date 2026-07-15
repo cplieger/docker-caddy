@@ -20,36 +20,77 @@ COPY tests/ /tmp/tests/
 COPY Caddyfile.example /tmp/tests/Caddyfile.example
 RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 
-FROM caddy:2.11@sha256:af5fdcd76f2db5e4e974ee92f96ee8c0fc3edb55bd4ba5032547cbf3f65e486d
+# ---------------------------------------------------------------------------
+# Probe stage — builds the static healthcheck binary. The distroless runtime
+# has no shell or wget, so the image ships github.com/cplieger/health's
+# cmd/probe as its HEALTHCHECK tool. The trailing checks assert the freshly
+# built probe runs on this arch and honors its exit-code contract (2 usage,
+# 1 unreachable) before it ships as the image's only healthcheck path.
+# ---------------------------------------------------------------------------
+FROM builder AS probe-builder
+# renovate: datasource=go depName=github.com/cplieger/health
+ARG HEALTH_VERSION=v1.2.0
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/cmd/probe@${HEALTH_VERSION}" \
+    && { /out/probe >/dev/null 2>&1; [ "$?" -eq 2 ]; } \
+    && { /out/probe -timeout 1s http://127.0.0.1:9/ >/dev/null 2>&1; [ "$?" -eq 1 ]; }
 
-# Patch the runtime base's OS packages for Alpine security fixes that upstream's
-# caddy image has not rebuilt for yet (notably openssl libssl3/libcrypto3). Caddy
-# is a static Go binary and never links OpenSSL, but the packages ship in the base
-# and are flagged by image scanners; upgrading keeps the published image clean.
+# ---------------------------------------------------------------------------
+# Contract donor — the upstream runtime image this image previously shipped
+# on. The distroless final stage cannot run upstream's setup commands, so it
+# COPIES the runtime contract out of the digest-pinned upstream image instead
+# of hand-cloning it: the default Caddyfile, the welcome page, the mime.types
+# map Caddy's file_server consults, and the pre-created state dirs with their
+# 1777 modes. Renovate keeps bumping this digest, so upstream contract changes
+# keep flowing into the final image automatically — only the ENV/EXPOSE/
+# WORKDIR metadata below is hand-cloned (re-check it on a major Caddy bump).
+# ---------------------------------------------------------------------------
+FROM caddy:2.11@sha256:af5fdcd76f2db5e4e974ee92f96ee8c0fc3edb55bd4ba5032547cbf3f65e486d AS donor
+
+# ---------------------------------------------------------------------------
+# Runtime — distroless/static: no shell, no package manager, no OS packages
+# to patch or scan. ca-certificates (outbound ACME/LAPI TLS), tzdata (the TZ
+# env contract), /etc/passwd (root), and /tmp ship in the base. Caddy is a
+# static Go binary, so nothing else is needed at runtime.
 #
-# tzdata: the upstream caddy:2.11 Alpine base ships no zoneinfo, and the
-# xcaddy-built binary dropped Go's embedded tz database, so the TZ env var
-# (e.g. TZ=Europe/Paris) is silently ignored without it. Installing tzdata
-# makes TZ honored for log timestamps and time-based config.
-# hadolint ignore=DL3017
-RUN apk upgrade --no-cache \
-    && apk add --no-cache tzdata \
-    # Drop the curl stack (curl + its transitive libs): unused at runtime (the
-    # healthcheck uses BusyBox wget, caddy is a static Go binary) and a recurring
-    # image-scanner CVE source. The transitive list is hand-maintained; the
-    # test-stage marker gate catches breakage.
-    && apk del --no-cache curl libcurl c-ares nghttp2-libs libidn2 libpsl libunistring brotli-libs zstd-libs
+# Root stays the image default so the documented out-of-the-box low-port
+# behavior is unchanged. Note upstream's setcap'd binary loses its file
+# capability on any COPY (xattrs are not carried), in this image and in the
+# previous Alpine-based one alike — non-root low-port binding rides Docker's
+# default `net.ipv4.ip_unprivileged_port_start=0` instead; see the README's
+# unprivileged recipe.
+# ---------------------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:latest@sha256:61b7ccecebc7c474a531717de80a94709d20547cdcdaf740c25876f2a8e38b44
+
+# Upstream runtime contract (see the donor stage comment). XDG_DATA_HOME is
+# what makes `/data` the certificate/ACME store — without it Caddy would
+# silently fall back to $HOME/.local/share/caddy and cert persistence across
+# restarts would break for every user of the documented /data volume.
+COPY --from=donor /etc/caddy /etc/caddy
+COPY --from=donor /usr/share/caddy /usr/share/caddy
+COPY --from=donor /etc/mime.types /etc/mime.types
+COPY --from=donor /config /config
+COPY --from=donor /data /data
+ENV XDG_CONFIG_HOME=/config
+ENV XDG_DATA_HOME=/data
 
 COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
+COPY --chmod=755 --from=probe-builder /out/probe /probe
 # Force the test stage to build and pass before the runtime image is produced.
 COPY --from=test /tests-passed /tests-passed
-# Liveness probe against Caddy's admin API on 127.0.0.1:2019. This is
-# route-independent while the admin API stays enabled at its default loopback
-# address; Caddyfiles that set `admin off` or rebind admin must override the
-# healthcheck to a route-level probe.
-# For an end-to-end check that verifies the proxy actually serves traffic,
-# override this in your compose to probe a /health route — see Caddyfile.example
-# and the README. Override the interval/timeout/retries there too.
+
+EXPOSE 80 443 443/udp 2019
+WORKDIR /srv
+
+# Liveness probe against Caddy's admin API on 127.0.0.1:2019: route-independent
+# while the admin API stays enabled at its default loopback address, and it
+# catches admin-plane faults (hung reloads) that a serving-route probe misses.
+# Caddyfiles that set `admin off` or rebind admin must override the healthcheck
+# to a route-level probe. For an end-to-end check that the proxy actually
+# serves traffic, override in compose to probe a /health route — or probe BOTH
+# surfaces in one run: ["/probe", "http://127.0.0.1:80/health",
+# "http://127.0.0.1:2019/config/"]. See Caddyfile.example and the README.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
-    CMD wget -qO- http://127.0.0.1:2019/config/ >/dev/null 2>&1 || exit 1
+    CMD ["/probe", "http://127.0.0.1:2019/config/"]
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
