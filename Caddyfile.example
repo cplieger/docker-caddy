@@ -7,21 +7,24 @@
 # Healthcheck note: the image's built-in healthcheck only probes Caddy's
 # admin API (liveness — "is Caddy up"). For an end-to-end check that verifies
 # the proxy actually serves traffic, the `http://:80` block below answers
-# /health over plaintext; override the healthcheck in compose.yaml to hit it:
+# /health over plaintext; override the healthcheck in compose.yaml to hit it
+# with the bundled /probe binary (the distroless runtime has no shell):
 #     healthcheck:
-#       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
+#       test: ["CMD", "/probe", "http://127.0.0.1:80/health"]
+# /probe accepts multiple URLs (all must answer 2xx), so you can watch the
+# serving path and the admin plane in one healthcheck:
+#     test: ["CMD", "/probe", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
 # /health must live in an explicit `http://:80` block: Caddy auto-redirects
 # :80 -> :443 for HTTPS site blocks, so a /health route inside one would 308
 # rather than answer over plaintext, and the probe would fail.
 
 # Global options.
 {
-	# Lock Caddy's admin API (config read/write) to loopback inside the
-	# container. The default bind is 0.0.0.0:2019, which exposes config
-	# read/write to any container on the proxy network. Do NOT set the
-	# CADDY_ADMIN env var on the service — it overrides this directive.
-	# The image healthcheck probes 127.0.0.1:2019, so this keeps the probe
-	# working while locking the admin API to loopback.
+	# Make Caddy's loopback-only admin bind explicit (localhost:2019 is
+	# also Caddy's documented default). The image healthcheck probes
+	# 127.0.0.1:2019, so stating it here guards against another global
+	# option accidentally rebinding it. Do NOT set the CADDY_ADMIN env
+	# var on the service — it overrides this directive.
 	admin localhost:2019
 }
 

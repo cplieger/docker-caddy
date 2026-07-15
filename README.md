@@ -2,7 +2,8 @@
 
 [![Image Size](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/docker-caddy/badges/size.json)](https://github.com/cplieger/docker-caddy/pkgs/container/docker-caddy)
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue)
-![base: Caddy](https://img.shields.io/badge/base-Caddy-1F88C0?logo=caddy)
+![built from: caddy-builder](https://img.shields.io/badge/built%20from-caddy--builder-1F88C0?logo=caddy)
+![runtime: distroless/static](https://img.shields.io/badge/runtime-distroless%2Fstatic-blue)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13203/badge)](https://www.bestpractices.dev/projects/13203)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/docker-caddy/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/docker-caddy)
 [![SBOM](https://img.shields.io/badge/SBOM-SPDX-1D4ED8)](https://github.com/cplieger/docker-caddy/releases)
@@ -16,11 +17,13 @@ Caddy is a modern, automatic-HTTPS reverse proxy and web server. This image rebu
 - **Issue ACME certificates via Cloudflare DNS-01** — for wildcard certs and internal-only services (see [Plugins](#plugins) for details).
 - **Block IPs flagged by CrowdSec** — community-driven threat intel applied at the reverse-proxy layer, before requests reach your backends.
 
-The base is upstream's official Caddy image, so all of Caddy's [standard features](https://caddyserver.com/docs/) work as documented.
+The binary is built with upstream's official builder and the runtime contract (config/data locations, default Caddyfile, welcome page, MIME map) is copied out of upstream's official image, so all of Caddy's [standard features](https://caddyserver.com/docs/) work as documented.
 
 ### Why this design
 
-- **Built from the official builder** — uses Caddy builder so the binary, ld-paths, and runtime layout match upstream Caddy exactly. The runtime base is `apk upgrade`d so OS security patches land without waiting for upstream to rebuild, gets `tzdata` added (the `xcaddy` build drops Go's embedded zoneinfo, so `TZ` needs it), and has the unused curl stack removed to shrink CVE surface.
+- **Built from the official builder** — uses Caddy builder so the binary matches upstream Caddy exactly. Plugins are compiled in with `xcaddy`, the upstream-prescribed mechanism.
+- **Distroless runtime** — the final stage is `gcr.io/distroless/static`: no shell, no package manager, no OS packages to patch or scan. Caddy is a static Go binary, so the runtime needs nothing beyond the base's ca-certificates and tzdata (`TZ` is honored; the `xcaddy` build drops Go's embedded zoneinfo, so the base providing it matters). There is nothing to `docker exec` into — debug via logs, metrics, and the admin API.
+- **Upstream contract preserved via a donor stage** — the default Caddyfile, welcome page, `/etc/mime.types` (Caddy's `file_server` consults it), the pre-created `/config` + `/data` state dirs, and the `XDG_*` env that makes `/data` the certificate store are copied from the digest-pinned upstream runtime image, not hand-cloned, so upstream contract changes keep flowing in via ordinary image bumps.
 - **Plugins pinned to specific versions** — `caddy-dns/cloudflare` and `hslatman/caddy-crowdsec-bouncer` are tracked by Renovate and updated via dependency PRs.
 - **Multi-arch, built natively** — CI builds each architecture on its own native runner (amd64 + arm64), so `xcaddy` compiles on matching hardware. No QEMU emulation and no buildx cross-compile build args.
 - **Watch mode enabled by default** — `caddy run --watch` reloads the Caddyfile on change without restarting the container.
@@ -84,7 +87,7 @@ A minimal Caddyfile that uses both plugins:
 }
 ```
 
-The `admin localhost:2019` directive keeps Caddy's admin API on loopback (the default bind is `0.0.0.0:2019`, which exposes config read/write to any container on the proxy network); do not set the `CADDY_ADMIN` env var on the compose service, as it overrides this directive.
+The `admin localhost:2019` directive makes Caddy's loopback-only admin bind explicit (it is also Caddy's documented default) — the built-in healthcheck probes this address, and stating it guards against a global options block accidentally rebinding it. Do not set the `CADDY_ADMIN` env var on the compose service, as it overrides this directive.
 
 ## Configuration reference
 
@@ -120,8 +123,9 @@ The image runs as **root** by default (the upstream Caddy default), so root bind
 To run Caddy as a non-root user instead:
 
 - set `user: "<uid>:<gid>"` on the service,
-- add `cap_add: [NET_BIND_SERVICE]` so the unprivileged process may bind the low ports,
 - `chown` the `/data` host directory to that UID (Caddy writes certs and ACME state there).
+
+Under Docker's defaults that is all: containers start with `net.ipv4.ip_unprivileged_port_start=0`, so an unprivileged process binds 80/443 directly. `cap_add: [NET_BIND_SERVICE]` does **not** help a non-root user here — Docker grants added capabilities to root, and the binary carries no file capability (a `COPY` never preserves one, in this image and the previous Alpine-based one alike). If your daemon hardens `ip_unprivileged_port_start`, restore it per container with `sysctls: ["net.ipv4.ip_unprivileged_port_start=0"]` instead.
 
 ## Alerting
 
@@ -147,7 +151,7 @@ Thresholds and the `severity` labels are starting points; add your scrape `job` 
 
 ## Healthcheck
 
-The image ships a **liveness** healthcheck (`30s/5s/3 retries/15s start_period`): BusyBox `wget` probes Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up and its config is loaded, and it works out of the box for **any** Caddyfile — no route configuration required.
+The image ships a **liveness** healthcheck (`30s/5s/3 retries/15s start_period`): the bundled `/probe` binary ([`cplieger/health`](https://github.com/cplieger/health)'s `cmd/probe` — the runtime has no shell or wget) GETs Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up, its config is loaded, and the admin plane is responsive (it catches faults like a hung reload that keep serving traffic while the admin API is dead), and it works out of the box for **any** Caddyfile — no route configuration required.
 
 > **Note:** the default probe hits Caddy's admin API. If your Caddyfile sets `admin off` or rebinds the admin endpoint, this probe fails even though Caddy is serving normally — switch to the end-to-end `/health` override below in that case.
 
@@ -163,10 +167,17 @@ It must live in an explicit `http://:80` block — Caddy auto-redirects `:80` �
 
 ```yaml
 healthcheck:
-  test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
+  test: ["CMD", "/probe", "http://127.0.0.1:80/health"]
 ```
 
-Override the timing in your compose for tighter detection windows regardless of which probe you use.
+The probe accepts multiple URLs — every one must answer 2xx within a shared budget (`-timeout`, default 5s) — so you can watch the serving path **and** the admin plane in one healthcheck instead of choosing:
+
+```yaml
+healthcheck:
+  test: ["CMD", "/probe", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
+```
+
+Exit codes: 0 healthy, 1 any probe failed (each failure is one stderr line naming the URL, visible in `docker inspect --format '{{json .State.Health}}'`), 2 usage error. Override the timing in your compose for tighter detection windows regardless of which probe you use.
 
 ## Plugins
 
@@ -181,7 +192,7 @@ Source: [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare)
 
 ### hslatman/caddy-crowdsec-bouncer
 
-Adds a CrowdSec HTTP bouncer that queries the CrowdSec Local API on every request and blocks IPs in the active decision list. CrowdSec scenarios (HTTP probes, scrapers, brute-force) trigger decisions that this bouncer enforces at the proxy layer.
+Adds a CrowdSec HTTP bouncer that checks every request against a locally cached copy of the active decision list (refreshed from the CrowdSec Local API via a streaming subscription) and blocks listed IPs — no network round-trip in the request path. CrowdSec scenarios (HTTP probes, scrapers, brute-force) trigger decisions that this bouncer enforces at the proxy layer.
 
 > **Enforcement-only.** The bouncer pulls the active decision list from the CrowdSec LAPI (a lightweight cached stream) and blocks IPs. It does not run the CrowdSec engine, generate alerts, or touch the engine's database — so a healthy bouncer does not imply CrowdSec is detecting anything. The engine and its database (which, on SQLite, must run with `use_wal: true` or LAPI queries serialize and time out under bouncer-stream load) are a separate, server-side concern.
 
@@ -193,7 +204,7 @@ Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crow
 | ------------------------------------------------ | ------------------------------------------------ |
 | [hadolint](https://github.com/hadolint/hadolint) | Clean                                            |
 | [gitleaks](https://github.com/gitleaks/gitleaks) | No secrets detected                              |
-| [trivy](https://trivy.dev/)                      | Clean (runtime base apk-upgraded for OS patches) |
+| [trivy](https://trivy.dev/)                      | Clean (distroless runtime: no OS packages)       |
 
 Two transitive Go-module CVEs still surface in scans (`CVE-2026-44982` in CrowdSec, `CVE-2026-2303` in mongo-driver), but neither is reachable in this build: the bundled bouncer links only CrowdSec's LAPI client, so the vulnerable AppSec body parser and the MongoDB GSSAPI bindings are never compiled in. They clear once the upstream bouncer plugin supports CrowdSec 1.7.8+.
 
@@ -209,12 +220,14 @@ cosign verify ghcr.io/cplieger/docker-caddy:latest \
 
 All dependencies are updated automatically via [Renovate](https://github.com/renovatebot/renovate) and pinned by digest or version for reproducibility.
 
-| Dependency             | Source                                                       |
-| ---------------------- | ------------------------------------------------------------ |
-| caddy (builder)        | [Docker Hub](https://hub.docker.com/_/caddy)                 |
-| caddy (runtime)        | [Docker Hub](https://hub.docker.com/_/caddy)                 |
-| caddy-dns/cloudflare   | [GitHub](https://github.com/caddy-dns/cloudflare)            |
-| caddy-crowdsec-bouncer | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer) |
+| Dependency                 | Source                                                       |
+| -------------------------- | ------------------------------------------------------------ |
+| caddy (builder)            | [Docker Hub](https://hub.docker.com/_/caddy)                 |
+| caddy (contract donor)     | [Docker Hub](https://hub.docker.com/_/caddy)                 |
+| distroless/static (runtime)| [gcr.io/distroless](https://github.com/GoogleContainerTools/distroless) |
+| caddy-dns/cloudflare       | [GitHub](https://github.com/caddy-dns/cloudflare)            |
+| caddy-crowdsec-bouncer     | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer) |
+| health (probe binary)      | [GitHub](https://github.com/cplieger/health)                 |
 
 ## Credits
 
