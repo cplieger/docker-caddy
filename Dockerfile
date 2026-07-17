@@ -29,7 +29,7 @@ RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 # ---------------------------------------------------------------------------
 FROM builder AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health
-ARG HEALTH_VERSION=v1.2.0
+ARG HEALTH_VERSION=v1.4.0
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/cmd/probe@${HEALTH_VERSION}" \
