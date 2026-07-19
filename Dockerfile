@@ -22,17 +22,18 @@ RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 
 # ---------------------------------------------------------------------------
 # Probe stage — builds the static healthcheck binary. The distroless runtime
-# has no shell or wget, so the image ships github.com/cplieger/health's
-# cmd/probe as its HEALTHCHECK tool. The trailing checks assert the freshly
-# built probe runs on this arch and honors its exit-code contract (2 usage,
-# 1 unreachable) before it ships as the image's only healthcheck path.
+# has no shell or wget, so the image ships the HTTP probe module of
+# github.com/cplieger/health (probe/cmd/probe, its own release lane) as its
+# HEALTHCHECK tool. The trailing checks assert the freshly built probe runs
+# on this arch and honors its exit-code contract (2 usage, 1 unreachable)
+# before it ships as the image's only healthcheck path.
 # ---------------------------------------------------------------------------
 FROM builder AS probe-builder
-# renovate: datasource=go depName=github.com/cplieger/health
-ARG HEALTH_VERSION=v1.2.0
+# renovate: datasource=go depName=github.com/cplieger/health/probe
+ARG HEALTH_PROBE_VERSION=v1.0.0
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/cmd/probe@${HEALTH_VERSION}" \
+    CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
     && { /out/probe >/dev/null 2>&1; [ "$?" -eq 2 ]; } \
     && { /out/probe -timeout 1s http://127.0.0.1:9/ >/dev/null 2>&1; [ "$?" -eq 1 ]; }
 
