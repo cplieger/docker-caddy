@@ -97,9 +97,11 @@ WORKDIR /srv
 # serves traffic, override in compose to probe a /health route — or probe BOTH
 # surfaces in one run: ["/probe", "http://127.0.0.1:80/health",
 # "http://127.0.0.1:2019/config/"]. See Caddyfile.example and the README.
-# Docker's --timeout (6s) sits one second above /probe's own 5s failure
-# budget so a slow or hung admin API is reported by the probe's exit code
-# and stderr diagnostic instead of being force-killed mid-report.
+# Docker's --timeout (6s) sits one second above /probe's explicit 5s failure
+# budget (-timeout below, pinned so a probe-release default change cannot
+# silently invert the relationship) so a slow or hung admin API is reported
+# by the probe's exit code and stderr diagnostic instead of being force-killed
+# mid-report.
 HEALTHCHECK --interval=30s --timeout=6s --retries=3 --start-period=15s \
-    CMD ["/probe", "http://127.0.0.1:2019/config/"]
+    CMD ["/probe", "-timeout", "5s", "http://127.0.0.1:2019/config/"]
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
