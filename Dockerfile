@@ -83,10 +83,12 @@ COPY --chmod=755 --from=probe-builder /out/probe /probe
 # Force the test stage to build and pass before the runtime image is produced.
 COPY --from=test /tests-passed /tests-passed
 
-# Deliberate divergence from upstream's EXPOSE metadata: the unauthenticated
-# admin API (2019) stays loopback-only (no CADDY_ADMIN env) and is NOT
-# advertised, so `docker run -P` cannot invite publishing the admin plane.
-EXPOSE 80 443 443/udp
+# EXPOSE kept at upstream parity (hand-cloned metadata, re-checked on major
+# Caddy bumps). 2019 is Caddy's unauthenticated admin API: it stays
+# loopback-bound by default (no CADDY_ADMIN env), so publishing it — via -P or
+# an explicit -p — reaches a listener that answers only inside the container
+# unless a Caddyfile deliberately rebinds admin off loopback.
+EXPOSE 80 443 443/udp 2019
 WORKDIR /srv
 
 # Liveness probe against Caddy's admin API on 127.0.0.1:2019: route-independent
@@ -97,11 +99,14 @@ WORKDIR /srv
 # serves traffic, override in compose to probe a /health route — or probe BOTH
 # surfaces in one run: ["/probe", "http://127.0.0.1:80/health",
 # "http://127.0.0.1:2019/config/"]. See Caddyfile.example and the README.
-# Docker's --timeout (6s) sits one second above /probe's explicit 5s failure
-# budget (-timeout below, pinned so a probe-release default change cannot
-# silently invert the relationship) so a slow or hung admin API is reported
-# by the probe's exit code and stderr diagnostic instead of being force-killed
-# mid-report.
-HEALTHCHECK --interval=30s --timeout=6s --retries=3 --start-period=15s \
-    CMD ["/probe", "-timeout", "5s", "http://127.0.0.1:2019/config/"]
+# /probe's explicit 4s failure budget (-timeout below, pinned so a
+# probe-release default change cannot silently invert the relationship) sits
+# strictly below Docker's 5s --timeout, so a slow or hung admin API is
+# reported by the probe's exit code and stderr diagnostic instead of being
+# force-killed mid-report. Benign reload lock-holds on GET /config/ are
+# sub-second (nothing network-blocking runs under the reload lock at the
+# pinned plugin set); multi-second admin latency is the degraded state this
+# check exists to flag.
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
+    CMD ["/probe", "-timeout", "4s", "http://127.0.0.1:2019/config/"]
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
