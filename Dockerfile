@@ -97,8 +97,9 @@ WORKDIR /srv
 # Caddyfiles that set `admin off` or rebind admin must override the healthcheck
 # to a route-level probe. For an end-to-end check that the proxy actually
 # serves traffic, override in compose to probe a /health route — or probe BOTH
-# surfaces in one run: ["/probe", "http://127.0.0.1:80/health",
-# "http://127.0.0.1:2019/config/"]. See Caddyfile.example and the README.
+# surfaces in one run: ["/probe", "-timeout", "4s",
+# "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]. See
+# Caddyfile.example and the README.
 # /probe's explicit 4s failure budget (-timeout below, pinned so a
 # probe-release default change cannot silently invert the relationship) sits
 # strictly below Docker's 5s --timeout, so a slow or hung admin API is
