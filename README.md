@@ -151,7 +151,7 @@ Thresholds and the `severity` labels are starting points; add your scrape `job` 
 
 ## Healthcheck
 
-The image ships a **liveness** healthcheck (`30s/5s/3 retries/15s start_period`): the bundled `/probe` binary ([`cplieger/health`](https://github.com/cplieger/health)'s `probe/cmd/probe`, the HTTP-probe module's standalone binary — the runtime has no shell or wget) GETs Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up, its config is loaded, and the admin plane is responsive (it catches faults like a hung reload that keep serving traffic while the admin API is dead), and it works out of the box for **any** Caddyfile — no route configuration required.
+The image ships a **liveness** healthcheck (`30s interval / 6s Docker timeout / 3 retries / 15s start_period`; the probe enforces its own 5s budget — the 6s Docker ceiling gives it a margin to exit and report before Docker force-kills it): the bundled `/probe` binary ([`cplieger/health`](https://github.com/cplieger/health)'s `probe/cmd/probe`, the HTTP-probe module's standalone binary — the runtime has no shell or wget) GETs Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up, its config is loaded, and the admin plane is responsive (it catches faults like a hung reload that keep serving traffic while the admin API is dead), and it works out of the box for **any** Caddyfile — no route configuration required.
 
 > **Note:** the default probe hits Caddy's admin API. If your Caddyfile sets `admin off` or rebinds the admin endpoint, this probe fails even though Caddy is serving normally — switch to the end-to-end `/health` override below in that case.
 
