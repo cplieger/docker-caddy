@@ -1,6 +1,8 @@
 # check=error=true
-FROM caddy:2.11-builder@sha256:198d47eaee306d4d0c38a9960c89ff2c959aa29ad51d3e2dafa3e93ac961782a AS builder
+FROM caddy:2.11-builder@sha256:198d47eaee306d4d0c38a9960c89ff2c959aa29ad51d3e2dafa3e93ac961782a AS base
 ENV GOTOOLCHAIN=auto
+
+FROM base AS builder
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -28,7 +30,7 @@ RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 # on this arch and honors its exit-code contract (2 usage, 1 unreachable)
 # before it ships as the image's only healthcheck path.
 # ---------------------------------------------------------------------------
-FROM builder AS probe-builder
+FROM base AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health/probe
 ARG HEALTH_PROBE_VERSION=v1.0.0
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -81,7 +83,10 @@ COPY --chmod=755 --from=probe-builder /out/probe /probe
 # Force the test stage to build and pass before the runtime image is produced.
 COPY --from=test /tests-passed /tests-passed
 
-EXPOSE 80 443 443/udp 2019
+# Deliberate divergence from upstream's EXPOSE metadata: the unauthenticated
+# admin API (2019) stays loopback-only (no CADDY_ADMIN env) and is NOT
+# advertised, so `docker run -P` cannot invite publishing the admin plane.
+EXPOSE 80 443 443/udp
 WORKDIR /srv
 
 # Liveness probe against Caddy's admin API on 127.0.0.1:2019: route-independent
