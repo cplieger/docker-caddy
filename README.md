@@ -40,6 +40,7 @@ services:
     restart: unless-stopped
 
     environment:
+      TZ: "Europe/Paris"
       # Provide these via a gitignored .env file (compose reads it automatically)
       # or a secrets manager — never commit live tokens into this file.
       CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:?set in .env}"   # used by the DNS-01 plugin
@@ -151,7 +152,7 @@ Thresholds and the `severity` labels are starting points; add your scrape `job` 
 
 ## Healthcheck
 
-The image ships a **liveness** healthcheck (`30s/5s/3 retries/15s start_period`): the bundled `/probe` binary ([`cplieger/health`](https://github.com/cplieger/health)'s `probe/cmd/probe`, the HTTP-probe module's standalone binary — the runtime has no shell or wget) GETs Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up, its config is loaded, and the admin plane is responsive (it catches faults like a hung reload that keep serving traffic while the admin API is dead), and it works out of the box for **any** Caddyfile — no route configuration required.
+The image ships a **liveness** healthcheck (`30s interval / 5s Docker timeout / 3 retries / 15s start_period`; the probe runs with an explicit 4s budget — one second below the Docker ceiling, so it exits and reports before Docker force-kills it): the bundled `/probe` binary ([`cplieger/health`](https://github.com/cplieger/health)'s `probe/cmd/probe`, the HTTP-probe module's standalone binary — the runtime has no shell or wget) GETs Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up, its config is loaded, and the admin plane is responsive (it catches faults like a hung reload that keep serving traffic while the admin API is dead), and it works out of the box for **any** Caddyfile — no route configuration required.
 
 > **Note:** the default probe hits Caddy's admin API. If your Caddyfile sets `admin off` or rebinds the admin endpoint, this probe fails even though Caddy is serving normally — switch to the end-to-end `/health` override below in that case.
 
@@ -167,14 +168,14 @@ It must live in an explicit `http://:80` block — Caddy auto-redirects `:80` �
 
 ```yaml
 healthcheck:
-  test: ["CMD", "/probe", "http://127.0.0.1:80/health"]
+  test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health"]
 ```
 
-The probe accepts multiple URLs — every one must answer 2xx within a shared budget (`-timeout`, default 5s) — so you can watch the serving path **and** the admin plane in one healthcheck instead of choosing:
+The probe accepts multiple URLs — every one must answer 2xx within a shared `-timeout` budget (default 5s; pin it to 4s as shown so it stays below Docker's inherited 5s timeout and a slow endpoint is reported instead of force-killed) — so you can watch the serving path **and** the admin plane in one healthcheck instead of choosing:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "/probe", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
+  test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
 ```
 
 Exit codes: 0 healthy, 1 any probe failed (each failure is one stderr line naming the URL, visible in `docker inspect --format '{{json .State.Health}}'`), 2 usage error. Override the timing in your compose for tighter detection windows regardless of which probe you use.

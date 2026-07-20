@@ -10,10 +10,12 @@
 # /health over plaintext; override the healthcheck in compose.yaml to hit it
 # with the bundled /probe binary (the distroless runtime has no shell):
 #     healthcheck:
-#       test: ["CMD", "/probe", "http://127.0.0.1:80/health"]
+#       test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health"]
+# (pin -timeout below Docker's inherited 5s ceiling so a slow endpoint is
+# reported by exit code + stderr instead of the probe being force-killed).
 # /probe accepts multiple URLs (all must answer 2xx), so you can watch the
 # serving path and the admin plane in one healthcheck:
-#     test: ["CMD", "/probe", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
+#     test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
 # /health must live in an explicit `http://:80` block: Caddy auto-redirects
 # :80 -> :443 for HTTPS site blocks, so a /health route inside one would 308
 # rather than answer over plaintext, and the probe would fail.

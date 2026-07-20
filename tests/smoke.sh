@@ -14,7 +14,7 @@ set -eu
 d=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 caddy="${CADDY_BIN:-caddy}"
 fail=0
-log() { printf '%s\n' "$*"; }     # progress + final verdict -> stdout
+log() { printf '%s\n' "$*"; }     # final verdict -> stdout
 err() { printf '%s\n' "$*" >&2; } # failures + captured output -> stderr
 
 # 1. The binary runs.
@@ -25,19 +25,23 @@ if ! out=$("$caddy" version 2>&1); then
 fi
 
 # 2. Both bundled plugins are actually compiled in (the xcaddy failure mode).
+mods_listed=1
 if ! mods=$("$caddy" list-modules 2>&1); then
   err "FAIL: 'caddy list-modules' did not run"
   err "$mods"
   fail=1
+  mods_listed=0
   mods=""
 fi
-if ! printf '%s\n' "$mods" | grep -qE '^dns\.providers\.cloudflare[[:space:]]*$'; then
-  err "FAIL: dns.providers.cloudflare module is not compiled into the binary"
-  fail=1
-fi
-if ! printf '%s\n' "$mods" | grep -qE '^http\.handlers\.crowdsec[[:space:]]*$'; then
-  err "FAIL: http.handlers.crowdsec module is not compiled into the binary"
-  fail=1
+if [ "$mods_listed" -eq 1 ]; then
+  if ! printf '%s\n' "$mods" | grep -qE '^dns\.providers\.cloudflare[[:space:]]*$'; then
+    err "FAIL: dns.providers.cloudflare module is not compiled into the binary"
+    fail=1
+  fi
+  if ! printf '%s\n' "$mods" | grep -qE '^http\.handlers\.crowdsec[[:space:]]*$'; then
+    err "FAIL: http.handlers.crowdsec module is not compiled into the binary"
+    fail=1
+  fi
 fi
 
 # 3. The shipped example Caddyfile validates against this build.

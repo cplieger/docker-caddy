@@ -1,6 +1,8 @@
 # check=error=true
-FROM caddy:2.11-builder@sha256:198d47eaee306d4d0c38a9960c89ff2c959aa29ad51d3e2dafa3e93ac961782a AS builder
+FROM caddy:2.11-builder@sha256:198d47eaee306d4d0c38a9960c89ff2c959aa29ad51d3e2dafa3e93ac961782a AS base
 ENV GOTOOLCHAIN=auto
+
+FROM base AS builder
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -28,14 +30,14 @@ RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 # on this arch and honors its exit-code contract (2 usage, 1 unreachable)
 # before it ships as the image's only healthcheck path.
 # ---------------------------------------------------------------------------
-FROM builder AS probe-builder
+FROM base AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health/probe
 ARG HEALTH_PROBE_VERSION=v1.0.0
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
-    && { /out/probe >/dev/null 2>&1; [ "$?" -eq 2 ]; } \
-    && { /out/probe -timeout 1s http://127.0.0.1:9/ >/dev/null 2>&1; [ "$?" -eq 1 ]; }
+    && { out=$(/out/probe 2>&1); [ "$?" -eq 2 ] || { printf '%s\n' "probe usage-contract check failed (want exit 2), output:" "$out" >&2; exit 1; }; } \
+    && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; }
 
 # ---------------------------------------------------------------------------
 # Contract donor — the upstream runtime image this image previously shipped
@@ -81,6 +83,11 @@ COPY --chmod=755 --from=probe-builder /out/probe /probe
 # Force the test stage to build and pass before the runtime image is produced.
 COPY --from=test /tests-passed /tests-passed
 
+# EXPOSE kept at upstream parity (hand-cloned metadata, re-checked on major
+# Caddy bumps). 2019 is Caddy's unauthenticated admin API: it stays
+# loopback-bound by default (no CADDY_ADMIN env), so publishing it — via -P or
+# an explicit -p — reaches a listener that answers only inside the container
+# unless a Caddyfile deliberately rebinds admin off loopback.
 EXPOSE 80 443 443/udp 2019
 WORKDIR /srv
 
@@ -90,8 +97,17 @@ WORKDIR /srv
 # Caddyfiles that set `admin off` or rebind admin must override the healthcheck
 # to a route-level probe. For an end-to-end check that the proxy actually
 # serves traffic, override in compose to probe a /health route — or probe BOTH
-# surfaces in one run: ["/probe", "http://127.0.0.1:80/health",
-# "http://127.0.0.1:2019/config/"]. See Caddyfile.example and the README.
+# surfaces in one run: ["/probe", "-timeout", "4s",
+# "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]. See
+# Caddyfile.example and the README.
+# /probe's explicit 4s failure budget (-timeout below, pinned so a
+# probe-release default change cannot silently invert the relationship) sits
+# strictly below Docker's 5s --timeout, so a slow or hung admin API is
+# reported by the probe's exit code and stderr diagnostic instead of being
+# force-killed mid-report. Benign reload lock-holds on GET /config/ are
+# sub-second (nothing network-blocking runs under the reload lock at the
+# pinned plugin set); multi-second admin latency is the degraded state this
+# check exists to flag.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
-    CMD ["/probe", "http://127.0.0.1:2019/config/"]
+    CMD ["/probe", "-timeout", "4s", "http://127.0.0.1:2019/config/"]
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
