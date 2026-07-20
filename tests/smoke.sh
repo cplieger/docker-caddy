@@ -14,7 +14,7 @@ set -eu
 d=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 caddy="${CADDY_BIN:-caddy}"
 fail=0
-log() { printf '%s\n' "$*"; }     # progress + final verdict -> stdout
+log() { printf '%s\n' "$*"; }     # final verdict -> stdout
 err() { printf '%s\n' "$*" >&2; } # failures + captured output -> stderr
 
 # 1. The binary runs.

@@ -36,8 +36,8 @@ ARG HEALTH_PROBE_VERSION=v1.0.0
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
-    && { /out/probe >/dev/null 2>&1; [ "$?" -eq 2 ]; } \
-    && { /out/probe -timeout 1s http://127.0.0.1:9/ >/dev/null 2>&1; [ "$?" -eq 1 ]; }
+    && { out=$(/out/probe 2>&1); [ "$?" -eq 2 ] || { printf '%s\n' "probe usage-contract check failed (want exit 2), output:" "$out" >&2; exit 1; }; } \
+    && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; }
 
 # ---------------------------------------------------------------------------
 # Contract donor — the upstream runtime image this image previously shipped
