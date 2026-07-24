@@ -5,7 +5,7 @@
 #     cp Caddyfile.example Caddyfile
 #
 # Healthcheck note: the image's built-in healthcheck only probes Caddy's
-# admin API (liveness — "is Caddy up"). For an end-to-end check that verifies
+# admin API (liveness: "is Caddy up"). For an end-to-end check that verifies
 # the proxy actually serves traffic, the `http://:80` block below answers
 # /health over plaintext; override the healthcheck in compose.yaml to hit it
 # with the bundled /probe binary (the distroless runtime has no shell):
@@ -26,7 +26,7 @@
 	# also Caddy's documented default). The image healthcheck probes
 	# 127.0.0.1:2019, so stating it here guards against another global
 	# option accidentally rebinding it. Do NOT set the CADDY_ADMIN env
-	# var on the service — it overrides this directive.
+	# var on the service; it overrides this directive.
 	admin localhost:2019
 }
 
