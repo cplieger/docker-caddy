@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     xcaddy build \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
-        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.13.1
+        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.14.0
 
 # ---------------------------------------------------------------------------
 # Test stage — runs the build-time smoke test against the freshly built binary:
