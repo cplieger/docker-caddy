@@ -216,9 +216,9 @@ All dependencies are updated automatically via [Renovate](https://github.com/ren
 
 This project repackages [Caddy](https://caddyserver.com/) with two community plugins. All credit for the core functionality goes to the upstream maintainers:
 
-- [Caddy](https://github.com/caddyserver/caddy) by [@mholt](https://github.com/mholt) and the Caddy community
-- [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare): Cloudflare DNS-01 plugin
-- [caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer) by [@hslatman](https://github.com/hslatman): CrowdSec bouncer
+- [Caddy](https://github.com/caddyserver/caddy) by [@mholt](https://github.com/mholt) and the Caddy community (Apache-2.0)
+- [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare): Cloudflare DNS-01 plugin (Apache-2.0)
+- [caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer) by [@hslatman](https://github.com/hslatman): CrowdSec bouncer (Apache-2.0)
 - [xcaddy](https://github.com/caddyserver/xcaddy): Caddy plugin builder
 
 ## Contributing
@@ -233,4 +233,4 @@ This project was built with AI-assisted tooling using [Claude](https://claude.co
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
