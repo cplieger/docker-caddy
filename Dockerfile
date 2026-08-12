@@ -49,7 +49,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # keep flowing into the final image automatically — only the ENV/EXPOSE/
 # WORKDIR metadata below is hand-cloned (re-check it on a major Caddy bump).
 # ---------------------------------------------------------------------------
-FROM caddy:2.11@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9 AS donor
+FROM caddy:2.11@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d AS donor
 
 # ---------------------------------------------------------------------------
 # Runtime — distroless/static: no shell, no package manager, no OS packages
