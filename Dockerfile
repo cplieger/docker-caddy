@@ -64,7 +64,7 @@ FROM caddy:2.11@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2
 # default `net.ipv4.ip_unprivileged_port_start=0` instead; see the README's
 # unprivileged recipe.
 # ---------------------------------------------------------------------------
-FROM gcr.io/distroless/static-debian12:latest@sha256:6447365a6337c3732f412d1b74357b30a633831955b2bc45552b0086be907687
+FROM gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 
 # Upstream runtime contract (see the donor stage comment). XDG_DATA_HOME is
 # what makes `/data` the certificate/ACME store — without it Caddy would
