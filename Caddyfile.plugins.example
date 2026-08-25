@@ -25,12 +25,17 @@
 	# The bouncer registers no directive order, so a site-block `crowdsec`
 	# needs one stated here.
 	order crowdsec first
+	# Registers Caddy's per-request HTTP instrumentation, which alerts.yaml's
+	# CaddyHigh5xxRate reads. Caddy documents a throughput cost on very busy
+	# servers, so delete this line to decline it; the 5xx rule then has no
+	# series and cannot fire.
+	metrics
 
 	crowdsec {
 		api_url http://crowdsec:8080
 		api_key {env.CROWDSEC_BOUNCER_KEY}
 		# Registers the bouncer's LAPI counters on the admin /metrics endpoint,
-		# which alerts.yaml's CrowdSecBouncerLAPIFailing reads.
+		# which alerts.yaml's CaddyCrowdSecLAPIFailing reads.
 		enable_caddy_metrics
 	}
 }
@@ -46,5 +51,9 @@ http://:80 {
 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
 	crowdsec
+	# No health checks are configured, so alerts.yaml's CaddyUpstreamUnhealthy
+	# cannot fire against this example. Enable it with `fail_duration` (passive)
+	# or a `health_uri <path>` subdirective inside this block, both of which
+	# change proxy behaviour on upstream errors.
 	reverse_proxy backend:3000
 }

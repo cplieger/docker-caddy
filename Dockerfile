@@ -30,12 +30,12 @@ FROM caddy:2.11@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2
 
 FROM gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 
-# Hand-cloned, not COPYed from the donor: XDG_DATA_HOME is what makes /data the cert store — re-check on a major Caddy bump.
 COPY --from=donor /etc/caddy /etc/caddy
 COPY --from=donor /usr/share/caddy /usr/share/caddy
 COPY --from=donor /etc/mime.types /etc/mime.types
 COPY --from=donor /config /config
 COPY --from=donor /data /data
+# Hand-cloned, not COPYed from the donor: XDG_DATA_HOME is what makes /data the cert store — re-check on a major Caddy bump.
 ENV XDG_CONFIG_HOME=/config
 ENV XDG_DATA_HOME=/data
 

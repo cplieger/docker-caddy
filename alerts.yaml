@@ -4,10 +4,10 @@
 # the admin endpoint, so the baseline for all of them is keeping the admin API
 # on and scraping it. The two bundled plugins differ, so each gets its own
 # reason. The bouncer registers no series unless `enable_caddy_metrics` is set
-# in the `crowdsec` global block — the shipped Caddyfile.plugins.example sets
-# it — and with it set its LAPI counters land in the registry the admin
-# /metrics endpoint serves, which is what CrowdSecBouncerLAPIFailing below
-# reads. Only the fail-open VERDICT stays unscrapeable: that lives at POST
+# in the `crowdsec` global block, which the shipped Caddyfile.plugins.example
+# sets. With it set, its LAPI counters land in the registry the admin /metrics
+# endpoint serves, which is what CaddyCrowdSecLAPIFailing below reads.
+# Only the fail-open VERDICT stays unscrapeable: that lives at POST
 # /crowdsec/health (see the README). The cloudflare DNS-01 plugin has no rule
 # because Caddy registers no certificate, ACME or expiry series at all, so a
 # renewal that stops working is invisible at this endpoint by any rule; detect
@@ -49,7 +49,7 @@ groups:
         annotations:
           summary: "Caddy config reload failed"
           description: >
-            caddy_config_last_reload_successful=0; a config reload was applied
+            caddy_config_last_reload_successful=0; a config reload was attempted
             and rejected, so the running config is the previous one. Validate
             the Caddyfile (caddy validate) and check for a bad config reload.
             Note this gauge moves only when Caddy attempts to apply a config
@@ -70,7 +70,7 @@ groups:
             More than 5% of responses are 5xx over 10m (at >1 req/s). Indicates
             upstream failures or a broken route; correlate with
             CaddyUpstreamUnhealthy and the backend logs.
-      - alert: CrowdSecBouncerLAPIFailing
+      - alert: CaddyCrowdSecLAPIFailing
         expr: >
           rate(crowdsec_bouncer_lapi_requests_failures_total{mode="stream"}[10m])
           / rate(crowdsec_bouncer_lapi_requests_total{mode="stream"}[10m]) > 0.5
