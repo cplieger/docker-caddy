@@ -4,32 +4,17 @@
 # /etc/caddy/Caddyfile), then edit it for your sites:
 #     cp Caddyfile.example Caddyfile
 #
-# Healthcheck note: the image's built-in healthcheck only probes Caddy's
-# admin API (liveness: "is Caddy up"). For an end-to-end check that verifies
-# the proxy actually serves traffic, the `http://:80` block below answers
-# /health over plaintext; override the healthcheck in compose.yaml to hit it
-# with the bundled /probe binary (the distroless runtime has no shell):
-#     healthcheck:
-#       test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health"]
-# (pin -timeout below Docker's inherited 5s ceiling so a slow endpoint is
-# reported by exit code + stderr instead of the probe being force-killed).
-# /probe accepts multiple URLs (all must answer 2xx), so you can watch the
-# serving path and the admin plane in one healthcheck:
-#     test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
-# /health must live in an explicit `http://:80` block: Caddy auto-redirects
-# :80 -> :443 for HTTPS site blocks, so a /health route inside one would 308
-# rather than answer over plaintext, and the probe would fail.
+# For healthcheck overrides that probe the /health route below, see the README.
 
-# Global options.
 {
-	# Make Caddy's loopback-only admin bind explicit (localhost:2019 is
-	# also Caddy's documented default). The image healthcheck probes
-	# 127.0.0.1:2019, so stating it here guards against another global
-	# option accidentally rebinding it. Do NOT set the CADDY_ADMIN env
-	# var on the service; it overrides this directive.
+	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
+	# directive outranks the CADDY_ADMIN env var (which only supplies the
+	# default used when no admin address is configured).
 	admin localhost:2019
 }
 
+# /health must live in an explicit `http://:80` block: Caddy auto-redirects :80 -> :443
+# for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
 http://:80 {
 	respond /health 200
 }
@@ -41,9 +26,9 @@ http://:80 {
 # 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 # 	}
 #
-# 	# CrowdSec bouncer (needs CROWDSEC_BOUNCER_KEY in the env). Configure the
-# 	# LAPI connection in global options and enable the handler per-site; see
-# 	# https://github.com/hslatman/caddy-crowdsec-bouncer for the exact syntax.
+# 	# CrowdSec bouncer (needs CROWDSEC_BOUNCER_KEY in the env). The LAPI
+# 	# connection is configured in global options; the handler registers no
+# 	# directive order, so a site-block `crowdsec` needs `order crowdsec first`.
 #
 # 	reverse_proxy 192.168.1.10:8080
 # }

@@ -8,8 +8,8 @@ services:
     environment:
       TZ: "Europe/Paris"
       # Set these in a gitignored .env file; never commit live tokens.
-      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:?set in .env}"  # used by the DNS-01 plugin
-      CROWDSEC_BOUNCER_KEY: "${CROWDSEC_BOUNCER_KEY:?set in .env}"  # used by the CrowdSec bouncer
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:-}"  # used by the DNS-01 plugin
+      CROWDSEC_BOUNCER_KEY: "${CROWDSEC_BOUNCER_KEY:-}"  # used by the CrowdSec bouncer
 
     ports:
       - "80:80"
@@ -17,5 +17,5 @@ services:
       - "443:443/udp"  # HTTP/3
 
     volumes:
-      - "./Caddyfile:/etc/caddy/Caddyfile:ro"  # copy Caddyfile.example; it locks the admin API to loopback (do not set CADDY_ADMIN)
+      - "./Caddyfile:/etc/caddy/Caddyfile:ro"  # copy Caddyfile.example; it locks the admin API to loopback
       - "./data:/data"  # persist issued certs + ACME state

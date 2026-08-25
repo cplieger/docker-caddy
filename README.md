@@ -22,10 +22,33 @@ All of Caddy's [standard features](https://caddyserver.com/docs/) work as docume
 ### Why this design
 
 - **Built from the official builder.** The binary matches upstream Caddy exactly; plugins are compiled in with `xcaddy`, the upstream-prescribed mechanism.
-- **Distroless runtime.** The final stage is `gcr.io/distroless/static`: no shell, no package manager, no OS packages to patch or scan. `TZ` is honored (the base ships tzdata). There is nothing to `docker exec` into; debug via logs, metrics, and the admin API.
+- **Distroless runtime.** The final stage is `gcr.io/distroless/static`: no shell, no package manager, no OS packages to patch or scan. `TZ` is honored (the base ships tzdata). There is no shell to `docker exec` into, and `docker exec` can only run the shipped binaries (`caddy`, `/probe`); debugging is otherwise via logs, metrics, and the admin API.
 - **Upstream contract preserved.** The default Caddyfile, welcome page, MIME map, state directories, and the `XDG_*` env that makes `/data` the certificate store are copied from the upstream runtime image, so upstream contract changes keep flowing in with ordinary image updates.
 - **Multi-arch, built natively.** amd64 and arm64 each compile on matching hardware, with no emulation.
-- **Watch mode enabled by default.** `caddy run --watch` reloads the Caddyfile on change without restarting the container.
+- **Config reload without a restart.** Send the running process SIGUSR1 —
+  `docker kill -s USR1 caddy` — and Caddy reloads from the `--config` file and
+  `--adapter` this image's CMD already records. For a deploy script that needs a
+  rejected Caddyfile on the caller's own exit status, use
+  `docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`.
+  Either way a rejected Caddyfile leaves the previous config running.
+- **Watch mode available, off by default.** Upstream documents `--watch` as a
+  local-development feature, so the shipped command is upstream's. To opt in, override
+  the command on your compose service:
+
+  ```yaml
+  command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
+  ```
+
+  Know what that turns on: one save that fails to ADAPT stops the watcher for the
+  lifetime of the container, and later valid edits are then ignored with no healthcheck
+  and no metric reporting it — the `watcher` logger emits `unable to load latest config`
+  once, carrying the adapter error, at the moment it dies. Recovery is a container
+  restart; an explicit reload applies the current file but does not revive the watcher.
+  Validate before saving with
+  `docker exec caddy caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile`.
+  Separately, a single-file bind mount pins an inode, so an editor that saves by rename
+  leaves the container reading the old bytes — save in place, or mount the directory
+  (`./caddy:/etc/caddy`). That defeats every reload path, not only the watcher.
 
 ## Quick start
 
@@ -41,8 +64,8 @@ services:
     environment:
       TZ: "Europe/Paris"
       # Set these in a gitignored .env file; never commit live tokens.
-      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:?set in .env}"   # used by the DNS-01 plugin
-      CROWDSEC_BOUNCER_KEY: "${CROWDSEC_BOUNCER_KEY:?set in .env}"   # used by the CrowdSec bouncer
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:-}"   # used by the DNS-01 plugin
+      CROWDSEC_BOUNCER_KEY: "${CROWDSEC_BOUNCER_KEY:-}"   # used by the CrowdSec bouncer
 
     ports:
       - "80:80"
@@ -61,6 +84,8 @@ A minimal Caddyfile that uses both plugins:
     # Lock the admin API (config read/write) to loopback inside the container.
     admin localhost:2019
 
+    order crowdsec first
+
     crowdsec {
         api_url http://crowdsec:8080
         api_key {env.CROWDSEC_BOUNCER_KEY}
@@ -76,7 +101,7 @@ A minimal Caddyfile that uses both plugins:
 }
 ```
 
-The `admin localhost:2019` directive makes Caddy's loopback-only admin bind explicit (it is also Caddy's documented default). The built-in healthcheck probes this address; stating it guards against a global options block accidentally rebinding it. Do not set the `CADDY_ADMIN` env var on the compose service, as it overrides this directive.
+The `admin localhost:2019` directive makes Caddy's loopback-only admin bind explicit (it is also Caddy's documented default). The built-in healthcheck probes this address; stating it guards against a global options block accidentally rebinding it. The directive outranks the `CADDY_ADMIN` env var, which only supplies the default admin address Caddy uses when no `admin` directive configures one.
 
 ## Configuration reference
 
@@ -86,14 +111,14 @@ Caddy reads its full config from the Caddyfile; environment variables are only u
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | API token with `Zone:Zone:Read` + `Zone:DNS:Edit` for the zones you serve; read by the `caddy-dns/cloudflare` DNS-01 plugin via `{env.CLOUDFLARE_API_TOKEN}`. | _(unset)_ |
+| `CLOUDFLARE_API_TOKEN` | API token with `Zone:Zone:Read` + `Zone:DNS:Edit` for the zones you serve; read by the `caddy-dns/cloudflare` DNS-01 plugin via `{env.CLOUDFLARE_API_TOKEN}`. A token the plugin rejects on format is echoed verbatim into the container log, so treat any value that appears in a startup or reload error as exposed and rotate it. | _(unset)_ |
 | `CROWDSEC_BOUNCER_KEY` | Bouncer API key (generate with `cscli bouncers add caddy`); read by the `caddy-crowdsec-bouncer` plugin via `{env.CROWDSEC_BOUNCER_KEY}`. | _(unset)_ |
 
 ### Volumes
 
 | Mount | Description |
 | --- | --- |
-| `/etc/caddy/Caddyfile` | Your Caddyfile (read-only is fine; `--watch` watches for changes) |
+| `/etc/caddy/Caddyfile` | Your Caddyfile (read-only is fine; reload with `docker kill -s USR1 caddy`, or `docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`) |
 | `/data` | Caddy's data directory: issued certificates, ACME state, plugin storage. **Persist this** or you'll re-issue certs on every restart. |
 | `/config` | (optional) Caddy's auto-generated JSON config and persistent state |
 

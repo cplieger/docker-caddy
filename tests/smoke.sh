@@ -5,8 +5,8 @@
 # centralized `ci / validate` docker build-ability gate executes it on every
 # PR and push. The real failure mode for a custom xcaddy build is a plugin
 # silently dropping out of the binary, so this asserts both bundled plugins are
-# compiled in and that the shipped example Caddyfile validates against the
-# build.
+# compiled in, that the shipped example Caddyfile validates against the build,
+# and that a config USING both plugins adapts.
 #
 # Run locally:  sh tests/smoke.sh   (needs the plugin-built caddy on PATH)
 set -eu
@@ -62,10 +62,45 @@ fi
 #    checks the exit code, not a specific adapter error string). An unclosed
 #    site block is a pure syntax error no caddy version can accept.
 bad=$(mktemp)
-trap 'rm -f "$bad"' EXIT
+plugins=$(mktemp)
+trap 'rm -f "$bad" "$plugins"' EXIT
 printf '%s\n' ':80 {' >"$bad"
 if "$caddy" validate --adapter caddyfile --config "$bad" >/dev/null 2>&1; then
   err "FAIL: 'caddy validate' accepted a malformed Caddyfile (vacuous gate?)"
+  fail=1
+fi
+
+# 5. A config that USES both bundled plugins adapts. Steps 2 and 3 do not
+#    cover this: step 2 proves only that the modules are registered, and
+#    every plugin directive in Caddyfile.example is commented out, so no
+#    config this script adapts exercises `dns cloudflare` or `crowdsec`. A
+#    Caddy handler directive with no registered order is refused at adapt
+#    time and the bundled bouncer registers none, so this is the assertion
+#    that catches a documented plugin config that cannot load. The token and
+#    key are synthesized rather than committed: the cloudflare provider
+#    validates the token's FORMAT at provision time and the crowdsec app
+#    refuses an empty API key. `caddy validate` provisions without starting,
+#    so no CrowdSec LAPI is contacted.
+cat >"$plugins" <<EOF
+{
+	admin localhost:2019
+	order crowdsec first
+	crowdsec {
+		api_url http://127.0.0.1:8080
+		api_key smoke-not-a-real-key
+	}
+}
+example.com {
+	tls {
+		dns cloudflare $(printf 'cfut_%032d' 0)
+	}
+	crowdsec
+	reverse_proxy 127.0.0.1:8080
+}
+EOF
+if ! out=$("$caddy" validate --adapter caddyfile --config "$plugins" 2>&1); then
+  err "FAIL: 'caddy validate' rejected a config using both bundled plugins"
+  err "$out"
   fail=1
 fi
 

@@ -12,7 +12,6 @@
 #   COPY Caddyfile.example ...
 # (All other COPYs use --from=<stage> and never touch the build context.)
 *
-!Dockerfile
 !Caddyfile.example
 !tests/
 !tests/**
