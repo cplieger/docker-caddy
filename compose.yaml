@@ -17,5 +17,5 @@ services:
       - "443:443/udp"  # HTTP/3
 
     volumes:
-      - "./Caddyfile:/etc/caddy/Caddyfile:ro"  # copy Caddyfile.example; it locks the admin API to loopback
+      - "./Caddyfile:/etc/caddy/Caddyfile:ro"  # copy Caddyfile.example or Caddyfile.plugins.example; both lock the admin API to loopback
       - "./data:/data"  # persist issued certs + ACME state

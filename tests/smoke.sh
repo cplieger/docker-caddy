@@ -104,5 +104,17 @@ if CLOUDFLARE_API_TOKEN="$cf_token" CROWDSEC_BOUNCER_KEY='' \
   fail=1
 fi
 
+# 6. Both shipped examples are `caddy fmt` clean. Steps 3 and 5 cannot see this:
+#    the caddyfile adapter reports unformatted input as a WARNING and `caddy
+#    validate` still exits 0, so an example that ships dirty warns on every start
+#    and every reload of the copy an operator made from it.
+for cfg in "$example" "$plugins"; do
+  if ! out=$("$caddy" fmt --diff "$cfg" 2>&1); then
+    err "FAIL: 'caddy fmt --diff' reports $cfg is not formatted"
+    err "$out"
+    fail=1
+  fi
+done
+
 [ "$fail" -eq 0 ] && log "caddy smoke: ok"
 exit "$fail"

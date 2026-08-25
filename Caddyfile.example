@@ -7,7 +7,6 @@
 # For a site block that uses the bundled plugins, and for the two credentials
 # it needs, see Caddyfile.plugins.example. For healthcheck overrides that probe
 # the /health route below, see the README.
-
 {
 	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
 	# directive outranks the CADDY_ADMIN env var (which only supplies the

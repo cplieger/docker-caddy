@@ -1,13 +1,21 @@
 # Example Caddyfile for ghcr.io/cplieger/docker-caddy using both bundled plugins.
 #
 # Usage: copy this file to `Caddyfile` (the name compose.yaml mounts at
-# /etc/caddy/Caddyfile), then edit the site address and the reverse_proxy target:
+# /etc/caddy/Caddyfile):
 #     cp Caddyfile.plugins.example Caddyfile
+#
+# Then make three edits:
+#   1. the site address;
+#   2. the reverse_proxy target;
+#   3. `crowdsec.api_url` -> a CrowdSec LAPI address reachable from THIS
+#      container. The shipped http://crowdsec:8080 assumes a `crowdsec` service
+#      alias on a shared Compose network, which the one-service compose.yaml
+#      example does not create. The bouncer fails open on a LAPI it cannot
+#      reach, so a wrong value here serves every request unblocked.
 #
 # Both plugins refuse to provision without their credential, so the environment
 # must carry CLOUDFLARE_API_TOKEN and CROWDSEC_BOUNCER_KEY (compose.yaml passes
 # both).
-
 {
 	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
 	# directive outranks the CADDY_ADMIN env var (which only supplies the
@@ -21,6 +29,9 @@
 	crowdsec {
 		api_url http://crowdsec:8080
 		api_key {env.CROWDSEC_BOUNCER_KEY}
+		# Registers the bouncer's LAPI counters on the admin /metrics endpoint,
+		# which alerts.yaml's CrowdSecBouncerLAPIFailing reads.
+		enable_caddy_metrics
 	}
 }
 

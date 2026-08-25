@@ -77,7 +77,7 @@ services:
       - ./data:/data
 ```
 
-The bundled [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) is a minimal Caddyfile that uses both plugins; copy it to `Caddyfile` and edit the site address and the `reverse_proxy` target. It reads `CLOUDFLARE_API_TOKEN` for the DNS-01 challenge and `CROWDSEC_BOUNCER_KEY` for the bouncer, both of which the compose service above passes through. The build's smoke test validates that file against the shipped binary, so the example cannot drift from what the image can load.
+The bundled [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) is a minimal Caddyfile that uses both plugins; copy it to `Caddyfile` and make three edits: the site address, the `reverse_proxy` target, and `crowdsec.api_url` — a CrowdSec LAPI address reachable from the Caddy container. The shipped `http://crowdsec:8080` assumes a `crowdsec` service alias on a shared Compose network, which the one-service compose example above does not create; the bouncer fails open on a LAPI it cannot reach, so a wrong value serves every request unblocked. It reads `CLOUDFLARE_API_TOKEN` for the DNS-01 challenge and `CROWDSEC_BOUNCER_KEY` for the bouncer, both of which the compose service above passes through. The build's smoke test validates that file against the shipped binary, so the example cannot drift from what the image can load.
 
 Both shipped examples state `admin localhost:2019`, which makes Caddy's loopback-only admin bind explicit (it is also Caddy's documented default). The built-in healthcheck probes this address; stating it guards against a global options block accidentally rebinding it. The directive outranks the `CADDY_ADMIN` env var, which only supplies the default admin address Caddy uses when no `admin` directive configures one.
 
@@ -109,6 +109,9 @@ Reference either credential only as `{env.VAR}`, never as a literal in the Caddy
 | `80` | TCP | HTTP: HTTP-01 challenges and redirects to HTTPS |
 | `443` | TCP | HTTPS / HTTP/2 |
 | `443` | UDP | HTTP/3 (QUIC) |
+| `2019` | TCP | Caddy's admin API (unauthenticated): loopback-bound by default, so publishing it reaches a listener that answers only inside the container |
+
+The admin API port is declared for documentation and for in-namespace scrapers; publishing it is only useful if a Caddyfile deliberately rebinds `admin` off loopback, and at that point it is an unauthenticated control plane on a routable address.
 
 ### Running unprivileged
 
@@ -123,7 +126,7 @@ Under Docker's defaults that is all: containers start with `net.ipv4.ip_unprivil
 
 ## Alerting
 
-These alerts fire on Caddy's own built-in Prometheus metrics, served on the admin API's `/metrics` endpoint, so keep the admin API enabled (it is on by default) and scrape it. One of the three, `CaddyHigh5xxRate`, additionally needs the `metrics` global option, which is what registers Caddy's per-request HTTP instrumentation:
+These alerts fire on metrics served by the admin API's `/metrics` endpoint, so keep the admin API enabled (it is on by default) and scrape it. `CaddyHigh5xxRate` additionally needs the `metrics` global option, which is what registers Caddy's per-request HTTP instrumentation:
 
 ```caddy
 {
@@ -131,7 +134,7 @@ These alerts fire on Caddy's own built-in Prometheus metrics, served on the admi
 }
 ```
 
-Caddy then serves the metrics at the admin API's `/metrics` endpoint (`http://localhost:2019/metrics` with the example's `admin localhost:2019`). The admin API is bound to loopback, so scrape it from inside the container's network namespace (for example a monitoring sidecar) or expose it on a routable listener with Caddy's [`metrics`](https://caddyserver.com/docs/caddyfile/directives/metrics) handler directive.
+With that set, the per-request series appear alongside the rest at `http://localhost:2019/metrics` (the example's `admin localhost:2019`). The admin API is bound to loopback, so scrape it from inside the container's network namespace (for example a monitoring sidecar) or expose it on a routable listener with Caddy's [`metrics`](https://caddyserver.com/docs/caddyfile/directives/metrics) handler directive.
 
 The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's own prerequisites are stated in the file's header; evaluate them with Prometheus or the Mimir ruler and route firing alerts through your Alertmanager. They cover:
 
@@ -140,8 +143,11 @@ The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's ow
 | `CaddyUpstreamUnhealthy` | a `reverse_proxy` upstream's health check reports it down for >5m | warning |
 | `CaddyConfigReloadFailed` | the last config reload was rejected, so the running config is stale | critical |
 | `CaddyHigh5xxRate` | more than 5% of responses are 5xx over 10m (at >1 req/s) | warning |
+| `CrowdSecBouncerLAPIFailing` | more than half the bouncer's LAPI decision-stream polls have failed over 10m, so enforcement is fail-open | warning |
 
 Thresholds and the `severity` labels are starting points; add your scrape `job` label to the selectors if you scrape more than one instance, and route by whatever labels your Alertmanager uses.
+
+The bundle covers Caddy's own metrics and, with `enable_caddy_metrics` in the `crowdsec` global block (the shipped `Caddyfile.plugins.example` sets it), the bouncer's LAPI stream. It cannot cover certificate renewal: Caddy registers no certificate or ACME series, so a DNS-01 renewal that stops working is detectable only from outside, with a TLS prober against the served site.
 
 ## Healthcheck
 
@@ -190,7 +196,7 @@ Adds a CrowdSec HTTP bouncer that checks every request against a locally cached 
 
 > **Enforcement-only.** The bouncer pulls the active decision list from the CrowdSec LAPI and blocks IPs. It does not run the CrowdSec engine, generate alerts, or touch the engine's database, so a healthy bouncer does not imply CrowdSec is detecting anything. The engine and its database are a separate, server-side concern; a SQLite-backed engine must run with `use_wal: true`, or LAPI queries serialize and time out under the bouncer's stream load.
 >
-> **Fail-open by default, and its failure is silent.** If the LAPI is unreachable the bouncer serves requests unblocked rather than refusing them, so a CrowdSec outage removes the protection without failing a single request, without a healthcheck transition, and without a metric this image can alert on. Set `enable_hard_fails` in the `crowdsec` global block to fail requests instead; the tradeoff is that a CrowdSec outage then becomes an outage of everything behind the proxy, which is why the default is the other way. The bouncer's own view is available at the admin API, `curl -XPOST http://127.0.0.1:2019/crowdsec/health`, which answers `{"ok":false}` on a LAPI outage. Treat that as a manual or sidecar diagnostic: it answers only POST (a GET is 405'd, so the bundled `/probe` cannot be pointed at it) and it reports the outage in the body while returning HTTP 200, so a status-only prober reads it as success. Automatic detection needs a body-aware POST prober, such as a `blackbox_exporter` module with `method: POST` and a body matcher plus an alert on that probe's `probe_success`; this image ships neither.
+> **Fail-open by default, and its failure is silent.** If the LAPI is unreachable the bouncer serves requests unblocked rather than refusing them, so a CrowdSec outage removes the protection without failing a single request, without a healthcheck transition, and, unless `enable_caddy_metrics` is set in the `crowdsec` global block, without a metric to alert on; the shipped `Caddyfile.plugins.example` sets it, and `alerts.yaml`'s `CrowdSecBouncerLAPIFailing` alerts on the failing LAPI poll. Set `enable_hard_fails` in the `crowdsec` global block to fail requests instead; the tradeoff is that a CrowdSec outage then becomes an outage of everything behind the proxy, which is why the default is the other way. The bouncer's own view is available at the admin API, `curl -XPOST http://127.0.0.1:2019/crowdsec/health`, which answers `{"Ok":false}` on a LAPI outage (the capital is the plugin's own JSON shape across all of its admin endpoints, so match on it exactly). Treat that as a manual or sidecar diagnostic: it answers only POST (a GET is 405'd, so the bundled `/probe` cannot be pointed at it) and it reports the outage in the body while returning HTTP 200, so a status-only prober reads it as success. The bundled rule detects the LAPI outage that causes the fail-open. Detecting the fail-open VERDICT itself still needs a body-aware POST prober — a `blackbox_exporter` module with `method: POST` and a body matcher, alerting on that probe's `probe_success` — which this image does not ship.
 
 Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer)
 
