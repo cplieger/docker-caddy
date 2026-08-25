@@ -25,8 +25,8 @@ All of Caddy's [standard features](https://caddyserver.com/docs/) work as docume
 - **Distroless runtime.** The final stage is `gcr.io/distroless/static`: no shell, no package manager, no OS packages to patch or scan. `TZ` is honored (the base ships tzdata). There is no shell to `docker exec` into, and `docker exec` can only run the shipped binaries (`caddy`, `/probe`); debugging is otherwise via logs, metrics, and the admin API.
 - **Upstream contract preserved.** The default Caddyfile, welcome page, MIME map, state directories, and the `XDG_*` env that makes `/data` the certificate store are copied from the upstream runtime image, so upstream contract changes keep flowing in with ordinary image updates.
 - **Multi-arch, built natively.** amd64 and arm64 each compile on matching hardware, with no emulation.
-- **Config reload without a restart.** Send the running process SIGUSR1 —
-  `docker kill -s USR1 caddy` — and Caddy reloads from the `--config` file and
+- **Config reload without a restart.** Send the running process SIGUSR1
+  (`docker kill -s USR1 caddy`) and Caddy reloads from the `--config` file and
   `--adapter` this image's CMD already records. For a deploy script that needs a
   rejected Caddyfile on the caller's own exit status, use
   `docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`.
@@ -41,13 +41,13 @@ All of Caddy's [standard features](https://caddyserver.com/docs/) work as docume
 
   Know what that turns on: one save that fails to ADAPT stops the watcher for the
   lifetime of the container, and later valid edits are then ignored with no healthcheck
-  and no metric reporting it — the `watcher` logger emits `unable to load latest config`
+  and no metric reporting it; the `watcher` logger emits `unable to load latest config`
   once, carrying the adapter error, at the moment it dies. Recovery is a container
   restart; an explicit reload applies the current file but does not revive the watcher.
   Validate before saving with
   `docker exec caddy caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile`.
   Separately, a single-file bind mount pins an inode, so an editor that saves by rename
-  leaves the container reading the old bytes — save in place, or mount the directory
+  leaves the container reading the old bytes; save in place, or mount the directory
   (`./caddy:/etc/caddy`). That defeats every reload path, not only the watcher.
 
 ## Quick start
@@ -77,31 +77,9 @@ services:
       - ./data:/data
 ```
 
-A minimal Caddyfile that uses both plugins:
+The bundled [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) is a minimal Caddyfile that uses both plugins; copy it to `Caddyfile` and edit the site address and the `reverse_proxy` target. It reads `CLOUDFLARE_API_TOKEN` for the DNS-01 challenge and `CROWDSEC_BOUNCER_KEY` for the bouncer, both of which the compose service above passes through. The build's smoke test validates that file against the shipped binary, so the example cannot drift from what the image can load.
 
-```caddy
-{
-    # Lock the admin API (config read/write) to loopback inside the container.
-    admin localhost:2019
-
-    order crowdsec first
-
-    crowdsec {
-        api_url http://crowdsec:8080
-        api_key {env.CROWDSEC_BOUNCER_KEY}
-    }
-}
-
-*.example.com {
-    tls {
-        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
-    }
-    crowdsec
-    reverse_proxy backend:3000
-}
-```
-
-The `admin localhost:2019` directive makes Caddy's loopback-only admin bind explicit (it is also Caddy's documented default). The built-in healthcheck probes this address; stating it guards against a global options block accidentally rebinding it. The directive outranks the `CADDY_ADMIN` env var, which only supplies the default admin address Caddy uses when no `admin` directive configures one.
+Both shipped examples state `admin localhost:2019`, which makes Caddy's loopback-only admin bind explicit (it is also Caddy's documented default). The built-in healthcheck probes this address; stating it guards against a global options block accidentally rebinding it. The directive outranks the `CADDY_ADMIN` env var, which only supplies the default admin address Caddy uses when no `admin` directive configures one.
 
 ## Configuration reference
 
@@ -113,6 +91,8 @@ Caddy reads its full config from the Caddyfile; environment variables are only u
 | --- | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | API token with `Zone:Zone:Read` + `Zone:DNS:Edit` for the zones you serve; read by the `caddy-dns/cloudflare` DNS-01 plugin via `{env.CLOUDFLARE_API_TOKEN}`. A token the plugin rejects on format is echoed verbatim into the container log, so treat any value that appears in a startup or reload error as exposed and rotate it. | _(unset)_ |
 | `CROWDSEC_BOUNCER_KEY` | Bouncer API key (generate with `cscli bouncers add caddy`); read by the `caddy-crowdsec-bouncer` plugin via `{env.CROWDSEC_BOUNCER_KEY}`. | _(unset)_ |
+
+Reference either credential only as `{env.VAR}`, never as a literal in the Caddyfile. The plugins resolve the placeholder at provision time, so the config the admin API serves at `GET /config/` keeps the placeholder; a hardcoded value comes back verbatim to anything that can reach that endpoint.
 
 ### Volumes
 
@@ -143,7 +123,7 @@ Under Docker's defaults that is all: containers start with `net.ipv4.ip_unprivil
 
 ## Alerting
 
-These alerts fire on Caddy's own built-in Prometheus metrics, so you have to turn metrics on first. Add the `metrics` global option to your Caddyfile and keep the admin API enabled (it is on by default):
+These alerts fire on Caddy's own built-in Prometheus metrics, served on the admin API's `/metrics` endpoint, so keep the admin API enabled (it is on by default) and scrape it. One of the three, `CaddyHigh5xxRate`, additionally needs the `metrics` global option, which is what registers Caddy's per-request HTTP instrumentation:
 
 ```caddy
 {
@@ -153,7 +133,7 @@ These alerts fire on Caddy's own built-in Prometheus metrics, so you have to tur
 
 Caddy then serves the metrics at the admin API's `/metrics` endpoint (`http://localhost:2019/metrics` with the example's `admin localhost:2019`). The admin API is bound to loopback, so scrape it from inside the container's network namespace (for example a monitoring sidecar) or expose it on a routable listener with Caddy's [`metrics`](https://caddyserver.com/docs/caddyfile/directives/metrics) handler directive.
 
-The recommended rules live in [`alerts.yaml`](alerts.yaml); evaluate them with Prometheus or the Mimir ruler and route firing alerts through your Alertmanager. They cover:
+The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's own prerequisites are stated in the file's header; evaluate them with Prometheus or the Mimir ruler and route firing alerts through your Alertmanager. They cover:
 
 | Alert | Fires when | Severity |
 | --- | --- | --- |
@@ -209,6 +189,8 @@ Source: [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare)
 Adds a CrowdSec HTTP bouncer that checks every request against a locally cached copy of the active decision list (refreshed from the CrowdSec Local API via a streaming subscription) and blocks listed IPs, with no network round-trip in the request path. CrowdSec scenarios (HTTP probes, scrapers, brute-force) trigger decisions that this bouncer enforces at the proxy layer.
 
 > **Enforcement-only.** The bouncer pulls the active decision list from the CrowdSec LAPI and blocks IPs. It does not run the CrowdSec engine, generate alerts, or touch the engine's database, so a healthy bouncer does not imply CrowdSec is detecting anything. The engine and its database are a separate, server-side concern; a SQLite-backed engine must run with `use_wal: true`, or LAPI queries serialize and time out under the bouncer's stream load.
+>
+> **Fail-open by default, and its failure is silent.** If the LAPI is unreachable the bouncer serves requests unblocked rather than refusing them, so a CrowdSec outage removes the protection without failing a single request, without a healthcheck transition, and without a metric this image can alert on. Set `enable_hard_fails` in the `crowdsec` global block to fail requests instead; the tradeoff is that a CrowdSec outage then becomes an outage of everything behind the proxy, which is why the default is the other way. The bouncer's own view is available at the admin API, `curl -XPOST http://127.0.0.1:2019/crowdsec/health`, which answers `{"ok":false}` on a LAPI outage. Treat that as a manual or sidecar diagnostic: it answers only POST (a GET is 405'd, so the bundled `/probe` cannot be pointed at it) and it reports the outage in the body while returning HTTP 200, so a status-only prober reads it as success. Automatic detection needs a body-aware POST prober, such as a `blackbox_exporter` module with `method: POST` and a body matcher plus an alert on that probe's `probe_success`; this image ships neither.
 
 Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer)
 

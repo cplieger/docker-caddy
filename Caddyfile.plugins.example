@@ -1,0 +1,39 @@
+# Example Caddyfile for ghcr.io/cplieger/docker-caddy using both bundled plugins.
+#
+# Usage: copy this file to `Caddyfile` (the name compose.yaml mounts at
+# /etc/caddy/Caddyfile), then edit the site address and the reverse_proxy target:
+#     cp Caddyfile.plugins.example Caddyfile
+#
+# Both plugins refuse to provision without their credential, so the environment
+# must carry CLOUDFLARE_API_TOKEN and CROWDSEC_BOUNCER_KEY (compose.yaml passes
+# both).
+
+{
+	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
+	# directive outranks the CADDY_ADMIN env var (which only supplies the
+	# default used when no admin address is configured).
+	admin localhost:2019
+
+	# The bouncer registers no directive order, so a site-block `crowdsec`
+	# needs one stated here.
+	order crowdsec first
+
+	crowdsec {
+		api_url http://crowdsec:8080
+		api_key {env.CROWDSEC_BOUNCER_KEY}
+	}
+}
+
+# /health must live in an explicit `http://:80` block: Caddy auto-redirects :80 -> :443
+# for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
+http://:80 {
+	respond /health 200
+}
+
+*.example.com {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	crowdsec
+	reverse_proxy backend:3000
+}

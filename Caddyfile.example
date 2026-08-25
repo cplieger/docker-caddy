@@ -4,7 +4,9 @@
 # /etc/caddy/Caddyfile), then edit it for your sites:
 #     cp Caddyfile.example Caddyfile
 #
-# For healthcheck overrides that probe the /health route below, see the README.
+# For a site block that uses the bundled plugins, and for the two credentials
+# it needs, see Caddyfile.plugins.example. For healthcheck overrides that probe
+# the /health route below, see the README.
 
 {
 	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
@@ -18,17 +20,3 @@
 http://:80 {
 	respond /health 200
 }
-
-# Example HTTPS site using the bundled plugins. Uncomment and adapt.
-# example.com {
-# 	# Cloudflare DNS-01 challenge (needs CLOUDFLARE_API_TOKEN in the env).
-# 	tls {
-# 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
-# 	}
-#
-# 	# CrowdSec bouncer (needs CROWDSEC_BOUNCER_KEY in the env). The LAPI
-# 	# connection is configured in global options; the handler registers no
-# 	# directive order, so a site-block `crowdsec` needs `order crowdsec first`.
-#
-# 	reverse_proxy 192.168.1.10:8080
-# }

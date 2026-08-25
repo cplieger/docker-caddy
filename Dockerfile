@@ -13,6 +13,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM builder AS test
 COPY tests/ /tmp/tests/
 COPY Caddyfile.example /tmp/tests/Caddyfile.example
+COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
 RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 
 # The distroless runtime has no shell or wget, so the image ships cplieger/health's probe.

@@ -1,8 +1,12 @@
 # Recommended alert rules for docker-caddy. Prometheus / Mimir ruler (PromQL)
-# rule group. All three rules read Caddy's own built-in Prometheus metrics from
-# the admin API's /metrics endpoint (http://localhost:2019/metrics by default),
-# which is permanently mounted on the admin endpoint — there is nothing to
-# enable, so keep the admin API on and scrape it.
+# rule group. Deliberately upstream-metrics-only: every rule reads Caddy's own
+# built-in Prometheus metrics from the admin API's /metrics endpoint
+# (http://localhost:2019/metrics by default), which is permanently mounted on
+# the admin endpoint, so there is nothing to enable beyond keeping the admin API
+# on and scraping it. The bundled plugins are deliberately not covered: the
+# bouncer registers no series without its own opt-in metrics subdirective, and
+# its fail-open state is reported only by an admin endpoint a Prometheus scrape
+# cannot read (see the README).
 # CaddyConfigReloadFailed and CaddyUpstreamUnhealthy need no Caddyfile option at
 # all: their metrics are registered unconditionally. CaddyUpstreamUnhealthy does
 # additionally require active or passive health checks configured on the
@@ -29,9 +33,8 @@ groups:
         annotations:
           summary: "Caddy upstream {{ $labels.upstream }} unhealthy"
           description: >
-            Caddy's active health check reports {{ $labels.upstream }} as down
-            for >5m; the fronted service is likely failing. Cross-check the
-            backend container.
+            Caddy reports {{ $labels.upstream }} as down for >5m; the fronted
+            service is likely failing. Cross-check the backend container.
       - alert: CaddyConfigReloadFailed
         expr: caddy_config_last_reload_successful == 0
         for: 1m
@@ -44,8 +47,8 @@ groups:
             and rejected, so the running config is the previous one. Validate
             the Caddyfile (caddy validate) and check for a bad config reload.
             Note this gauge moves only when Caddy attempts to apply a config
-            in-process: a Caddyfile that fails to ADAPT leaves it at 1 — which
-            is where both `caddy reload` and an opted-in `--watch` fail — so a
+            in-process. A Caddyfile that fails to ADAPT leaves it at 1, which
+            is where both `caddy reload` and an opted-in `--watch` fail, so a
             stale running config is not covered.
       - alert: CaddyHigh5xxRate
         expr: >
