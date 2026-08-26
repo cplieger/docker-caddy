@@ -89,7 +89,7 @@ Caddy reads its full config from the Caddyfile; environment variables are only u
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | API token with `Zone:Zone:Read` + `Zone:DNS:Edit` for the zones you serve; read by the `caddy-dns/cloudflare` DNS-01 plugin via `{env.CLOUDFLARE_API_TOKEN}`. A token the plugin rejects on format is echoed verbatim into the container log, so treat any value that appears in a startup or reload error as exposed and rotate it. The plugin's format check is anchored, so any extra character around the token fails it: surrounding quotes or braces, but also a stray space or a trailing newline picked up from a file. The error prints the whole value, so a good token can leak because of what surrounds it rather than what it is. Pass the bare token, with nothing around it. | _(unset)_ |
+| `CLOUDFLARE_API_TOKEN` | API token with `Zone:Zone:Read` + `Zone:DNS:Edit` for the zones you serve; read by the `caddy-dns/cloudflare` DNS-01 plugin via `{env.CLOUDFLARE_API_TOKEN}`. A token the plugin rejects on format is echoed verbatim into the container log, so treat any value that appears in a startup or reload error as exposed and rotate it. The plugin's format check is anchored, so any extra character around the token fails it: surrounding quotes or braces, but also a stray space or a trailing newline picked up from a file. The error prints the whole value, so a good token can leak because of what surrounds it rather than what it is. Pass the bare token, with nothing around it. The check also accepts Cloudflare's API token formats only, so a different KIND of Cloudflare credential is rejected for what it is and printed the same way: a new-format Global API Key (`cfk_...`) and an Origin CA key (`v1.0-...`) both fail it, and both grant far more than DNS-01 needs. Pass the API token the variable's name asks for, not either of those. | _(unset)_ |
 | `CROWDSEC_BOUNCER_KEY` | Bouncer API key (generate with `cscli bouncers add caddy`); read by the `caddy-crowdsec-bouncer` plugin via `{env.CROWDSEC_BOUNCER_KEY}`. | _(unset)_ |
 
 Reference either credential only as `{env.VAR}`, never as a literal in the Caddyfile. The plugins resolve the placeholder at provision time, so the config the admin API serves at `GET /config/` keeps the placeholder; a hardcoded value comes back verbatim to anything that can reach that endpoint.
@@ -120,21 +120,13 @@ The image runs as **root** by default (the upstream Caddy default), so root bind
 To run Caddy as a non-root user instead:
 
 - set `user: "<uid>:<gid>"` on the service,
-- `chown` the `/data` host directory to that UID (Caddy writes certs and ACME state there).
+- `chown` the `/data` host directory to that UID (Caddy writes certs and ACME state there), and `chown` the `/config` host directory too if you mount one, because Caddy writes its config autosave under `/config/caddy` and the image's own `/config/caddy` is world-writable only while `/config` stays unmounted. If that mount is not writable Caddy cannot write the autosave, it keeps serving, and the only symptom is that `--resume` has nothing to resume.
 
 Under Docker's defaults that is all: containers start with `net.ipv4.ip_unprivileged_port_start=0`, so an unprivileged process binds 80/443 directly. `cap_add: [NET_BIND_SERVICE]` does **not** help a non-root user here: Docker grants added capabilities to root, and the binary carries no file capability. If your daemon hardens `ip_unprivileged_port_start`, restore it per container with `sysctls: ["net.ipv4.ip_unprivileged_port_start=0"]` instead.
 
 ## Alerting
 
-These alerts fire on metrics served by the admin API's `/metrics` endpoint, so keep the admin API enabled (it is on by default) and scrape it. `CaddyHigh5xxRate` additionally needs the `metrics` global option, which is what registers Caddy's per-request HTTP instrumentation:
-
-```caddy
-{
-    metrics
-}
-```
-
-With that set, the per-request series appear alongside the rest at `http://localhost:2019/metrics` (the example's `admin localhost:2019`). The admin API is bound to loopback, so scrape it from inside the container's network namespace (for example a monitoring sidecar) or expose it on a routable listener with Caddy's [`metrics`](https://caddyserver.com/docs/caddyfile/directives/metrics) handler directive.
+These alerts fire on metrics served by the admin API's `/metrics` endpoint, so keep the admin API enabled (it is on by default) and scrape it. The series appear at `http://localhost:2019/metrics` (the example's `admin localhost:2019`). The admin API is bound to loopback, so scrape it from inside the container's network namespace (for example a monitoring sidecar) or expose it on a routable listener with Caddy's [`metrics`](https://caddyserver.com/docs/caddyfile/directives/metrics) handler directive.
 
 The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's own prerequisites are stated in the file's header; evaluate them with Prometheus or the Mimir ruler and route firing alerts through your Alertmanager. They cover:
 
@@ -142,8 +134,8 @@ The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's ow
 | --- | --- | --- |
 | `CaddyUpstreamUnhealthy` | a `reverse_proxy` upstream's health check reports it down for >5m | warning |
 | `CaddyConfigReloadFailed` | the last config reload was rejected, so the running config is stale | critical |
-| `CaddyHigh5xxRate` | more than 5% of responses are 5xx over 10m (at >1 req/s) | warning |
-| `CaddyCrowdSecLAPIFailing` | more than half the bouncer's LAPI decision-stream polls have failed over 10m, so enforcement is fail-open | warning |
+| `CaddyHigh5xxRate` | the 5xx share of the last 5 minutes of requests stays above 5% for 10 minutes, at more than 1 req/s over that same window | warning |
+| `CaddyCrowdSecLAPIFailing` | more than half the bouncer's LAPI decision-stream polls have failed over 10m | warning |
 
 Thresholds and the `severity` labels are starting points; add your scrape `job` label to the selectors if you scrape more than one instance, and route by whatever labels your Alertmanager uses.
 
@@ -196,7 +188,7 @@ Adds a CrowdSec HTTP bouncer that checks every request against a locally cached 
 
 > **Enforcement-only.** The bouncer pulls the active decision list from the CrowdSec LAPI and blocks IPs. It does not run the CrowdSec engine, generate alerts, or touch the engine's database, so a healthy bouncer does not imply CrowdSec is detecting anything. The engine and its database are a separate, server-side concern; a SQLite-backed engine must run with `use_wal: true`, or LAPI queries serialize and time out under the bouncer's stream load.
 >
-> **Fail-open by default, and its failure is silent.** If the LAPI is unreachable the bouncer serves requests unblocked rather than refusing them, so a CrowdSec outage removes the protection without failing a single request, without a healthcheck transition, and, unless `enable_caddy_metrics` is set in the `crowdsec` global block, without a metric to alert on; the shipped `Caddyfile.plugins.example` sets it, and `alerts.yaml`'s `CaddyCrowdSecLAPIFailing` alerts on the failing LAPI poll. Set `enable_hard_fails` in the `crowdsec` global block to fail requests instead; the tradeoff is that a CrowdSec outage then becomes an outage of everything behind the proxy, which is why the default is the other way. The bouncer's own view is available at the admin API, `curl -XPOST http://127.0.0.1:2019/crowdsec/health`, which answers `{"Ok":false}` on a LAPI outage (the capital is the plugin's own JSON shape across all of its admin endpoints, so match on it exactly). Treat that as a manual or sidecar diagnostic: it answers only POST (a GET is 405'd, so the bundled `/probe` cannot be pointed at it) and it reports the outage in the body while returning HTTP 200, so a status-only prober reads it as success. The bundled rule detects the LAPI outage that causes the fail-open. Detecting the fail-open VERDICT itself still needs a body-aware POST prober, which this image does not ship: a `blackbox_exporter` module with `method: POST` and a body matcher, alerting on that probe's `probe_success`.
+> **Fail-open by default, and its failure is silent.** If the LAPI is unreachable the bouncer stops learning decisions, without failing a single request, without a healthcheck transition, and, unless `enable_caddy_metrics` is set in the `crowdsec` global block, without a metric to alert on; the shipped `Caddyfile.plugins.example` sets it, and `alerts.yaml`'s `CaddyCrowdSecLAPIFailing` alerts on the failing LAPI poll. What enforcement survives the outage depends on the cache. With a warm cache, which is every case except an outage starting before the first decision-stream response, the decisions already cached keep being enforced for as long as the outage lasts; what stops is the learning, so no new decision arrives and no expiry is applied, and the enforced list silently ages. With a cold cache, an outage that begins before that first response, nothing is enforced. Set `enable_hard_fails` in the `crowdsec` global block to fail requests instead; the tradeoff is that a CrowdSec outage then becomes an outage of everything behind the proxy, which is why the default is the other way. The bouncer's own reachability check is on the admin API, `curl -XPOST http://127.0.0.1:2019/crowdsec/health`, which answers `{"Ok":false}` while the LAPI is unreachable (the capital is the plugin's own JSON shape across all of its admin endpoints, so match on it exactly). It pings the LAPI through the live bouncer and reads no decision, so what it reports is reachability, not what any request was allowed to do. Treat it as a manual or sidecar diagnostic: it answers only POST (a GET is 405'd, so the bundled `/probe` cannot be pointed at it) and it reports the outage in the body while returning HTTP 200, so a status-only prober reads it as success. Its value is mainly for a deployment that leaves `enable_caddy_metrics` off, since `CaddyCrowdSecLAPIFailing` detects the same outage otherwise. No surface in this bundle reports the fail-open verdict itself.
 
 Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer)
 

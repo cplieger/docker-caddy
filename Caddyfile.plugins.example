@@ -51,9 +51,11 @@ http://:80 {
 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
 	crowdsec
-	# No health checks are configured, so alerts.yaml's CaddyUpstreamUnhealthy
-	# cannot fire against this example. Enable it with `fail_duration` (passive)
-	# or a `health_uri <path>` subdirective inside this block, both of which
-	# change proxy behaviour on upstream errors.
+	# No health checks are configured on the `reverse_proxy`, so alerts.yaml's
+	# CaddyUpstreamUnhealthy cannot fire against this example. Both controls are
+	# reverse_proxy subdirectives, not site directives, so expand the one-liner
+	# below into `reverse_proxy backend:3000 { ... }` and put
+	# `fail_duration <duration>` (passive) or `health_uri <uri>` (active) inside
+	# the braces. Either one changes proxy behaviour on upstream errors.
 	reverse_proxy backend:3000
 }

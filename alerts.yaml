@@ -2,29 +2,41 @@
 # rule group. Every rule reads a series from the admin API's /metrics endpoint
 # (http://localhost:2019/metrics by default), which is permanently mounted on
 # the admin endpoint, so the baseline for all of them is keeping the admin API
-# on and scraping it. The two bundled plugins differ, so each gets its own
-# reason. The bouncer registers no series unless `enable_caddy_metrics` is set
-# in the `crowdsec` global block, which the shipped Caddyfile.plugins.example
-# sets. With it set, its LAPI counters land in the registry the admin /metrics
-# endpoint serves, which is what CaddyCrowdSecLAPIFailing below reads.
-# Only the fail-open VERDICT stays unscrapeable: that lives at POST
-# /crowdsec/health (see the README). The cloudflare DNS-01 plugin has no rule
-# because Caddy registers no certificate, ACME or expiry series at all, so a
-# renewal that stops working is invisible at this endpoint by any rule; detect
-# it from outside with a TLS prober against the served site
-# (blackbox_exporter's probe_ssl_earliest_cert_expiry).
-# CaddyConfigReloadFailed and CaddyUpstreamUnhealthy need no Caddyfile option at
-# all: their metrics are registered unconditionally. CaddyUpstreamUnhealthy does
-# additionally require active or passive health checks configured on the
-# `reverse_proxy` (`fail_duration` is enough for passive; Caddy performs none by
-# default), without which its series stays at 1 and the rule cannot fire.
+# on and scraping it. Beyond that baseline, three of the four rules have a
+# prerequisite of their own, stated below with whether the shipped
+# Caddyfile.plugins.example already satisfies it: it satisfies two of the
+# three, and the one it does not is health checks on the `reverse_proxy`.
+# CaddyConfigReloadFailed needs no Caddyfile option at all: its metric is
+# registered unconditionally.
+# CaddyUpstreamUnhealthy registers its metric unconditionally too, but requires
+# active or passive health checks configured on the `reverse_proxy`
+# (`fail_duration <duration>` is enough for passive, with the argument: the bare
+# option name yields a Caddyfile that fails to adapt, and Caddy performs no
+# health checks by default), without which its series stays at 1 and the rule
+# cannot fire. This is the one prerequisite the shipped example does NOT
+# satisfy, and the example says so at its `reverse_proxy` line.
 # CaddyHigh5xxRate is the one rule that needs the `metrics` global option,
 # because that option is what registers the HTTP per-request instrumentation it
-# reads. It is an aggregate ratio over whatever labels the scrape attached, so a
-# single failing vhost among many will not reach 5% of its target's total request
-# rate; `metrics { per_host }` adds the `host` label, which the expression
-# preserves automatically and which turns the rule per-vhost, at the cardinality
-# and memory cost Caddy's own documentation for the option names.
+# reads; the shipped example sets it, and the comment at that line states the
+# throughput cost of keeping it. It is an aggregate ratio over whatever labels
+# the scrape attached, so a single failing vhost among many will not reach 5% of
+# its target's total request rate; `metrics { per_host }` adds the `host` label,
+# which the expression preserves automatically and which turns the rule
+# per-vhost, at the cardinality and memory cost Caddy's own documentation for
+# the option names.
+# CaddyCrowdSecLAPIFailing reads the bouncer's LAPI counters, and the bouncer
+# registers no series at all unless `enable_caddy_metrics` is set in the
+# `crowdsec` global block, which the shipped example sets. With it set, those
+# counters land in the registry the admin /metrics endpoint serves. No surface
+# in this bundle reports the fail-open VERDICT: what the bundle detects is the
+# LAPI outage that causes it, and the admin API's POST /crowdsec/health is a
+# LAPI REACHABILITY check rather than a verdict read, since it pings the LAPI
+# through the live bouncer and inspects no decision.
+# The cloudflare DNS-01 plugin has no rule because Caddy registers no
+# certificate, ACME or expiry series at all, so a renewal that stops working is
+# invisible at this endpoint by any rule; detect it from outside with a TLS
+# prober against the served site (blackbox_exporter's
+# probe_ssl_earliest_cert_expiry).
 # Thresholds, `for:` windows, and the severity labels are starting points; adjust
 # them to your deployment. The scrape `job` label is yours to set, so it is
 # intentionally left out of the selectors.
@@ -67,9 +79,10 @@ groups:
         annotations:
           summary: "Caddy 5xx rate >5%"
           description: >
-            More than 5% of responses are 5xx over 10m (at >1 req/s). Indicates
-            upstream failures or a broken route; correlate with
-            CaddyUpstreamUnhealthy and the backend logs.
+            The 5xx share of the last 5 minutes of requests has stayed above 5%
+            for 10 minutes, at more than 1 request per second over that same
+            5-minute window. Indicates upstream failures or a broken route;
+            correlate with CaddyUpstreamUnhealthy and the backend logs.
       - alert: CaddyCrowdSecLAPIFailing
         expr: >
           rate(crowdsec_bouncer_lapi_requests_failures_total{mode="stream"}[10m])
@@ -81,11 +94,17 @@ groups:
           summary: "CrowdSec bouncer cannot reach the LAPI"
           description: >
             More than half of the bouncer's decision-stream polls have been failing
-            for >5m, so its cached decision list is stale and, unless
-            `enable_hard_fails` is set, flagged IPs are served unblocked. The proxy
-            keeps serving and the healthcheck stays green throughout, so this is the
-            shipped bundle's only automatic signal for the outage; the fail-open
-            VERDICT itself is readable only at POST /crowdsec/health, which a scrape
-            cannot read. Needs `enable_caddy_metrics` in the `crowdsec` global block,
-            which the shipped example sets. Check the CrowdSec LAPI and the bouncer's
-            `api_url` and `api_key`.
+            for >5m, so it is learning nothing further from the LAPI. What
+            enforcement survives depends on the cache. With a warm cache, which is
+            every case except an outage starting before the first stream response,
+            the decisions already cached keep being enforced for as long as the
+            outage lasts, while no new decision is learned and no expiry is
+            applied, so the enforced list silently ages. With a cold cache, an
+            outage that begins before that first response, nothing is enforced.
+            With `enable_hard_fails` set, the process fails requests rather than
+            serving them. The proxy keeps serving and the healthcheck stays green
+            throughout, so this rule is the shipped bundle's signal for the outage;
+            the admin API's POST /crowdsec/health is an alternative reachability
+            check. Needs `enable_caddy_metrics` in the `crowdsec` global block,
+            which the shipped example sets. Check the CrowdSec LAPI and the
+            bouncer's `api_url` and `api_key`.
