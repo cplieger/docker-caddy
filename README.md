@@ -77,7 +77,7 @@ services:
       - ./data:/data
 ```
 
-The bundled [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) is a minimal Caddyfile that uses both plugins; copy it to `Caddyfile` and make three edits: the site address, the `reverse_proxy` target, and `crowdsec.api_url`, a CrowdSec LAPI address reachable from the Caddy container. The shipped `http://crowdsec:8080` assumes a `crowdsec` service alias on a shared Compose network, which the one-service compose example above does not create; the bouncer fails open on a LAPI it cannot reach, so a wrong value serves every request unblocked. It reads `CLOUDFLARE_API_TOKEN` for the DNS-01 challenge and `CROWDSEC_BOUNCER_KEY` for the bouncer, both of which the compose service above passes through. The build's smoke test validates that file against the shipped binary, so the example cannot drift from what the image can load.
+The bundled [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) is a minimal Caddyfile that uses both plugins; copy it to `Caddyfile` and make three edits: the site address, the `reverse_proxy` target, and `crowdsec.api_url`, a CrowdSec LAPI address reachable from the Caddy container. The shipped `http://crowdsec:8080` assumes a `crowdsec` service alias on a shared Compose network, which the one-service compose example above does not create; the bouncer fails open on a LAPI it cannot reach, so a wrong value serves every request unblocked. It reads `CLOUDFLARE_API_TOKEN` for the DNS-01 challenge and `CROWDSEC_BOUNCER_KEY` for the bouncer, both of which the compose service above passes through. Set both before the first start. The compose example defaults them to empty (`${VAR:-}`) rather than refusing to start. Each plugin refuses to provision on an empty credential, so Caddy exits at startup and the restart policy retries it. The build's smoke test validates that file against the shipped binary, so the example cannot drift from what the image can load.
 
 Both shipped examples state `admin localhost:2019`, which makes Caddy's loopback-only admin bind explicit (it is also Caddy's documented default). The built-in healthcheck probes this address; stating it guards against a global options block accidentally rebinding it. The directive outranks the `CADDY_ADMIN` env var, which only supplies the default admin address Caddy uses when no `admin` directive configures one.
 
@@ -135,7 +135,7 @@ The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's ow
 | `CaddyUpstreamUnhealthy` | a `reverse_proxy` upstream's health check reports it down for >5m | warning |
 | `CaddyConfigReloadFailed` | the last config reload was rejected, so the running config is stale | critical |
 | `CaddyHigh5xxRate` | the 5xx share of the last 5 minutes of requests stays above 5% for 10 minutes, at more than 1 req/s over that same window | warning |
-| `CaddyCrowdSecLAPIFailing` | more than half the bouncer's LAPI decision-stream polls have failed over 10m | warning |
+| `CaddyCrowdSecLAPIFailing` | more than half the bouncer's LAPI decision-stream polls have failed over a 10m window, sustained for 5m | warning |
 
 Thresholds and the `severity` labels are starting points; add your scrape `job` label to the selectors if you scrape more than one instance, and route by whatever labels your Alertmanager uses.
 
@@ -147,7 +147,7 @@ The image ships a **liveness** healthcheck: the bundled `/probe` binary (from [`
 
 > **Note:** the default probe hits Caddy's admin API. If your Caddyfile sets `admin off` or rebinds the admin endpoint, this probe fails even though Caddy is serving normally; switch to the end-to-end `/health` override below in that case.
 
-For an **end-to-end** check that verifies the proxy is actually serving traffic (listener bound, routing works), override the healthcheck to probe a `/health` route. The bundled [`Caddyfile.example`](./Caddyfile.example) serves one on plaintext `:80`:
+For an **end-to-end** check that verifies the proxy is actually serving traffic (listener bound, routing works), override the healthcheck to probe a `/health` route. Both bundled examples serve one on plaintext `:80` ([`Caddyfile.example`](./Caddyfile.example) and [`Caddyfile.plugins.example`](./Caddyfile.plugins.example)):
 
 ```caddy
 http://:80 {
