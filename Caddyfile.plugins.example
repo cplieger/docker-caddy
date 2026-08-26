@@ -1,0 +1,61 @@
+# Example Caddyfile for ghcr.io/cplieger/docker-caddy using both bundled plugins.
+#
+# Usage: copy this file to `Caddyfile` (the name compose.yaml mounts at
+# /etc/caddy/Caddyfile):
+#     cp Caddyfile.plugins.example Caddyfile
+#
+# Then make three edits:
+#   1. the site address;
+#   2. the reverse_proxy target;
+#   3. `crowdsec.api_url` -> a CrowdSec LAPI address reachable from THIS
+#      container. The shipped http://crowdsec:8080 assumes a `crowdsec` service
+#      alias on a shared Compose network, which the one-service compose.yaml
+#      example does not create. The bouncer fails open on a LAPI it cannot
+#      reach, so a wrong value here serves every request unblocked.
+#
+# Both plugins refuse to provision without their credential, so the environment
+# must carry CLOUDFLARE_API_TOKEN and CROWDSEC_BOUNCER_KEY (compose.yaml passes
+# both).
+{
+	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
+	# directive outranks the CADDY_ADMIN env var (which only supplies the
+	# default used when no admin address is configured).
+	admin localhost:2019
+
+	# The bouncer registers no directive order, so a site-block `crowdsec`
+	# needs one stated here.
+	order crowdsec first
+	# Registers Caddy's per-request HTTP instrumentation, which alerts.yaml's
+	# CaddyHigh5xxRate reads. Caddy documents a throughput cost on very busy
+	# servers, so delete this line to decline it; the 5xx rule then has no
+	# series and cannot fire.
+	metrics
+
+	crowdsec {
+		api_url http://crowdsec:8080
+		api_key {env.CROWDSEC_BOUNCER_KEY}
+		# Registers the bouncer's LAPI counters on the admin /metrics endpoint,
+		# which alerts.yaml's CaddyCrowdSecLAPIFailing reads.
+		enable_caddy_metrics
+	}
+}
+
+# /health must live in an explicit `http://:80` block: Caddy auto-redirects :80 -> :443
+# for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
+http://:80 {
+	respond /health 200
+}
+
+*.example.com {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	crowdsec
+	# No health checks are configured on the `reverse_proxy`, so alerts.yaml's
+	# CaddyUpstreamUnhealthy cannot fire against this example. Both controls are
+	# reverse_proxy subdirectives, not site directives, so expand the one-liner
+	# below into `reverse_proxy backend:3000 { ... }` and put
+	# `fail_duration <duration>` (passive) or `health_uri <uri>` (active) inside
+	# the braces. Either one changes proxy behaviour on upstream errors.
+	reverse_proxy backend:3000
+}

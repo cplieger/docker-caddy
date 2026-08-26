@@ -10,26 +10,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
         --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.14.1
 
-# ---------------------------------------------------------------------------
-# Test stage — runs the build-time smoke test against the freshly built binary:
-# both bundled plugins must be compiled in (the xcaddy failure mode) and the
-# shipped example Caddyfile must validate. A failure here fails the centralized
-# `ci / validate` docker build gate, because the final stage depends on this
-# stage's marker.
-# ---------------------------------------------------------------------------
 FROM builder AS test
 COPY tests/ /tmp/tests/
 COPY Caddyfile.example /tmp/tests/Caddyfile.example
+COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
 RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 
-# ---------------------------------------------------------------------------
-# Probe stage — builds the static healthcheck binary. The distroless runtime
-# has no shell or wget, so the image ships the HTTP probe module of
-# github.com/cplieger/health (probe/cmd/probe, its own release lane) as its
-# HEALTHCHECK tool. The trailing checks assert the freshly built probe runs
-# on this arch and honors its exit-code contract (2 usage, 1 unreachable)
-# before it ships as the image's only healthcheck path.
-# ---------------------------------------------------------------------------
+# Asserts /probe's exit-code contract (2 usage, 1 unreachable): the HEALTHCHECK below reads those codes and HEALTH_PROBE_VERSION is Renovate-bumped.
 FROM base AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health/probe
 ARG HEALTH_PROBE_VERSION=v1.0.3
@@ -39,42 +26,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && { out=$(/out/probe 2>&1); [ "$?" -eq 2 ] || { printf '%s\n' "probe usage-contract check failed (want exit 2), output:" "$out" >&2; exit 1; }; } \
     && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; }
 
-# ---------------------------------------------------------------------------
-# Contract donor — the upstream runtime image this image previously shipped
-# on. The distroless final stage cannot run upstream's setup commands, so it
-# COPIES the runtime contract out of the digest-pinned upstream image instead
-# of hand-cloning it: the default Caddyfile, the welcome page, the mime.types
-# map Caddy's file_server consults, and the pre-created state dirs with their
-# 1777 modes. Renovate keeps bumping this digest, so upstream contract changes
-# keep flowing into the final image automatically — only the ENV/EXPOSE/
-# WORKDIR metadata below is hand-cloned (re-check it on a major Caddy bump).
-# ---------------------------------------------------------------------------
 FROM caddy:2.11@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d AS donor
 
-# ---------------------------------------------------------------------------
-# Runtime — distroless/static: no shell, no package manager, no OS packages
-# to patch or scan. ca-certificates (outbound ACME/LAPI TLS), tzdata (the TZ
-# env contract), /etc/passwd (root), and /tmp ship in the base. Caddy is a
-# static Go binary, so nothing else is needed at runtime.
-#
-# Root stays the image default so the documented out-of-the-box low-port
-# behavior is unchanged. Note upstream's setcap'd binary loses its file
-# capability on any COPY (xattrs are not carried), in this image and in the
-# previous Alpine-based one alike — non-root low-port binding rides Docker's
-# default `net.ipv4.ip_unprivileged_port_start=0` instead; see the README's
-# unprivileged recipe.
-# ---------------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 
-# Upstream runtime contract (see the donor stage comment). XDG_DATA_HOME is
-# what makes `/data` the certificate/ACME store — without it Caddy would
-# silently fall back to $HOME/.local/share/caddy and cert persistence across
-# restarts would break for every user of the documented /data volume.
 COPY --from=donor /etc/caddy /etc/caddy
 COPY --from=donor /usr/share/caddy /usr/share/caddy
 COPY --from=donor /etc/mime.types /etc/mime.types
 COPY --from=donor /config /config
 COPY --from=donor /data /data
+# Hand-cloned, not COPYed from the donor: XDG_DATA_HOME is what makes /data the cert store — re-check on a major Caddy bump.
 ENV XDG_CONFIG_HOME=/config
 ENV XDG_DATA_HOME=/data
 
@@ -83,31 +44,9 @@ COPY --chmod=755 --from=probe-builder /out/probe /probe
 # Force the test stage to build and pass before the runtime image is produced.
 COPY --from=test /tests-passed /tests-passed
 
-# EXPOSE kept at upstream parity (hand-cloned metadata, re-checked on major
-# Caddy bumps). 2019 is Caddy's unauthenticated admin API: it stays
-# loopback-bound by default (no CADDY_ADMIN env), so publishing it — via -P or
-# an explicit -p — reaches a listener that answers only inside the container
-# unless a Caddyfile deliberately rebinds admin off loopback.
 EXPOSE 80 443 443/udp 2019
 WORKDIR /srv
 
-# Liveness probe against Caddy's admin API on 127.0.0.1:2019: route-independent
-# while the admin API stays enabled at its default loopback address, and it
-# catches admin-plane faults (hung reloads) that a serving-route probe misses.
-# Caddyfiles that set `admin off` or rebind admin must override the healthcheck
-# to a route-level probe. For an end-to-end check that the proxy actually
-# serves traffic, override in compose to probe a /health route — or probe BOTH
-# surfaces in one run: ["/probe", "-timeout", "4s",
-# "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]. See
-# Caddyfile.example and the README.
-# /probe's explicit 4s failure budget (-timeout below, pinned so a
-# probe-release default change cannot silently invert the relationship) sits
-# strictly below Docker's 5s --timeout, so a slow or hung admin API is
-# reported by the probe's exit code and stderr diagnostic instead of being
-# force-killed mid-report. Benign reload lock-holds on GET /config/ are
-# sub-second (nothing network-blocking runs under the reload lock at the
-# pinned plugin set); multi-second admin latency is the degraded state this
-# check exists to flag.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
     CMD ["/probe", "-timeout", "4s", "http://127.0.0.1:2019/config/"]
-CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

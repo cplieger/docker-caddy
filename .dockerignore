@@ -10,9 +10,8 @@
 # Dockerfile actually reads from the build context:
 #   COPY tests/ ...
 #   COPY Caddyfile.example ...
-# (All other COPYs use --from=<stage> and never touch the build context.)
+#   COPY Caddyfile.plugins.example ...
 *
-!Dockerfile
 !Caddyfile.example
+!Caddyfile.plugins.example
 !tests/
-!tests/**
