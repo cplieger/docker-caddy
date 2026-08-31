@@ -8,6 +8,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/docker-caddy/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/docker-caddy)
 [![SBOM](https://img.shields.io/badge/SBOM-SPDX-1D4ED8)](https://github.com/cplieger/docker-caddy/releases)
 
+<!-- hub-overview BEGIN -->
 [Caddy](https://caddyserver.com/) reverse proxy and web server, custom-built with [`xcaddy`](https://github.com/caddyserver/xcaddy) to bundle the Cloudflare DNS-01 plugin and the CrowdSec HTTP bouncer.
 
 ## What it does
@@ -49,6 +50,7 @@ All of Caddy's [standard features](https://caddyserver.com/docs/) work as docume
   Separately, a single-file bind mount pins an inode, so an editor that saves by rename
   leaves the container reading the old bytes; save in place, or mount the directory
   (`./caddy:/etc/caddy`). That defeats every reload path, not only the watcher.
+<!-- hub-overview END -->
 
 ## Quick start
 
