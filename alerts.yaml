@@ -24,10 +24,15 @@
 # CaddyHigh5xxRate is the one rule that needs the `metrics` global option,
 # because that option is what registers the HTTP per-route instrumentation it
 # reads; the shipped example sets it, and the comment at that line states the
-# throughput cost of keeping it. The ratio is per handler. A Caddyfile with one
-# site block adapts to one non-terminal route per directive, so a request is
-# observed once per matched route. Keeping the `handler` label makes the number
-# a request share under the usual one-directive-per-handler layout. The
+# throughput cost of keeping it. The ratio is per handler, and how many
+# handler values a deployment has depends on its site ADDRESSES, not on how
+# many site blocks it writes. A block whose address carries a host or a
+# path adapts to one TERMINAL route wrapping a `subroute` handler, so every
+# request it serves is observed once, under the single value
+# handler="subroute". A block whose address carries neither, and is the only
+# block on its listener, is flattened to one non-terminal route per
+# directive, so a request is observed once per matched route and the
+# `handler` label is what keeps the number a request share.
 # `metrics { per_host }` option adds the `host` label, which the expression
 # preserves automatically and which turns the rule per-vhost, at the
 # cardinality and memory cost Caddy's own documentation for the option names.
@@ -94,14 +99,22 @@ groups:
             and rejected, so the running config is the previous one. Validate
             the Caddyfile (caddy validate) and check for a bad config reload.
             Note this gauge moves only when Caddy attempts to apply a config
-            in-process. A config the watcher cannot read or adapt leaves this
-            gauge at 1; CaddyConfigWatcherStopped covers that watcher case.
+            in-process. A config that fails to READ or ADAPT never reaches that
+            attempt and leaves this gauge at 1. For an opted-in `--watch` that
+            case is CaddyConfigWatcherStopped. For an explicit reload it is
+            covered by nothing here, and an explicit reload is the only reload
+            path a deployment has if it does not override the image CMD: a
+            failed SIGUSR1 logs `failed to reload config from file` at ERROR on
+            the DEFAULT logger, so it carries no `logger` field for the
+            selectors above, and `caddy reload` reports the parse error as an
+            exit status rather than into the container's log stream. The running
+            config stays stale either way.
       - alert: CaddyHigh5xxRate
         expr: >
           sum without (server, code, method) (rate(caddy_http_request_duration_seconds_count{code=~"5.."}[5m]))
           / sum without (server, code, method) (rate(caddy_http_request_duration_seconds_count[5m])) > 0.05
-          and ignoring(handler)
-          sum without (server, handler, code, method) (rate(caddy_http_request_duration_seconds_count[5m])) > 1
+          and ignoring(handler, host)
+          sum without (server, handler, code, method, host) (rate(caddy_http_request_duration_seconds_count[5m])) > 1
         for: 10m
         labels:
           severity: warning
@@ -221,11 +234,17 @@ groups:
             Caddy logged `unable to load latest config` under the `watcher`
             logger, so an opted-in `--watch` could not READ or ADAPT the
             current config file and the poller stopped for the life of the
-            process. Read the structured `error` field for which of the two it
-            was: `reading config from file:` is a missing, unreadable or
-            replaced mounted file, `adapting config using caddyfile:` is a
-            Caddyfile that does not parse. Different repairs, same dead
-            watcher. The running config is the last good one and keeps serving,
+            process. Read the structured `error` field for which arm it was:
+            `reading config from file:` is a missing or unreadable file,
+            `adapting config using caddyfile:` is a Caddyfile that does not
+            parse, and `config is not valid JSON:` is a JSON config watched
+            without `--adapter`. Different repairs, same dead watcher. A
+            REPLACED file is none of them and this rule cannot see it: with the
+            config DIRECTORY mounted, a rename is read cleanly on the next poll,
+            and with the single FILE bind-mounted the mount pins the inode, so
+            the poller keeps reading the old bytes and logs nothing at all.
+            Mount the directory, or save in place. The running config is the
+            last good one and keeps serving,
             later valid edits are ignored, and no other surface reports it:
             `caddy_config_last_reload_successful` stays 1 because no in-process
             load was attempted, and the container stays healthy. Recovery is a

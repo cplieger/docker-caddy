@@ -34,8 +34,10 @@
 	crowdsec {
 		api_url http://crowdsec:8080
 		api_key {env.CROWDSEC_BOUNCER_KEY}
-		# Registers the bouncer's LAPI counters on the admin /metrics endpoint,
-		# which alerts.yaml's CaddyCrowdSecLAPIFailing reads.
+		# Registers the bouncer's LAPI counters, which alerts.yaml's
+		# CaddyCrowdSecLAPIFailing reads. They land on the shared metrics
+		# registry, so both the loopback admin endpoint and the `:2020`
+		# listener below serve them.
 		enable_caddy_metrics
 	}
 }
@@ -46,6 +48,10 @@
 
 # /health must live in an explicit `http://:80` block: Caddy auto-redirects :80 -> :443
 # for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
+# The trailing `respond 404` is a matcherless terminal handler, and `respond` sorts
+# ahead of `metrics`, `reverse_proxy`, `php_fastcgi`, `file_server` and `acme_server`.
+# A handler directive added to THIS block therefore answers nothing, with no adapt or
+# validate error: give it its own site block, or a matcher of its own above this line.
 http://:80 {
 	respond /health 200
 	respond 404
