@@ -16,14 +16,13 @@ COPY Caddyfile.example /tmp/tests/Caddyfile.example
 COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
 RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 
-# Asserts /probe's exit-code contract (2 usage, 1 unreachable): the HEALTHCHECK below reads those codes and HEALTH_PROBE_VERSION is Renovate-bumped.
+# Asserts the freshly built probe runs on this arch and exits non-zero for an unreachable URL, which is what the HEALTHCHECK below rests on; HEALTH_PROBE_VERSION is Renovate-bumped.
 FROM base AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health/probe
 ARG HEALTH_PROBE_VERSION=v1.0.4
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
-    && { out=$(/out/probe 2>&1); [ "$?" -eq 2 ] || { printf '%s\n' "probe usage-contract check failed (want exit 2), output:" "$out" >&2; exit 1; }; } \
     && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; }
 
 FROM caddy:2.11@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d AS donor

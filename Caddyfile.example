@@ -1,8 +1,8 @@
 # Minimal example Caddyfile for ghcr.io/cplieger/docker-caddy.
 #
-# Usage: copy this file to `Caddyfile` (the name compose.yaml mounts at
-# /etc/caddy/Caddyfile), then edit it for your sites:
-#     cp Caddyfile.example Caddyfile
+# Usage: copy this file to `caddy/Caddyfile` (compose.yaml mounts the ./caddy
+# DIRECTORY at /etc/caddy), then edit it for your sites:
+#     mkdir -p caddy && cp Caddyfile.example caddy/Caddyfile
 #
 # For a site block that uses the bundled plugins, and for the two credentials
 # it needs, see Caddyfile.plugins.example. For healthcheck overrides that probe
@@ -18,4 +18,5 @@
 # for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
 http://:80 {
 	respond /health 200
+	respond 404
 }

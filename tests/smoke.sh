@@ -1,4 +1,12 @@
 #!/bin/sh
+# Build-time smoke test for docker-caddy.
+#
+# Runs in the Dockerfile `test` stage (FROM builder), so the central `ci / validate`
+# docker gate executes it on every PR and push -- the final stage depends on this
+# stage's /tests-passed marker. Asserts the real failure mode for a custom xcaddy
+# build: a plugin silently dropping out of the binary.
+#
+# Run locally:  sh tests/smoke.sh   (needs `caddy` on PATH; override CADDY_BIN)
 set -eu
 
 d=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -78,6 +86,15 @@ for cfg in "$example" "$plugins"; do
     fail=1
   fi
 done
+
+# Reject an unformatted config so the formatting check cannot become vacuous.
+unformatted=$(mktemp)
+trap 'rm -f "$bad" "$unformatted"' EXIT
+printf '%s\n' ':80 {' 'respond 200' '}' >"$unformatted"
+if "$caddy" fmt --diff "$unformatted" >/dev/null 2>&1; then
+  err "FAIL: 'caddy fmt --diff' accepted an unformatted Caddyfile (vacuous gate?)"
+  fail=1
+fi
 
 [ "$fail" -eq 0 ] && log "caddy smoke: ok"
 exit "$fail"

@@ -1,16 +1,6 @@
-# Keep the Docker build context minimal and secret-free.
-#
-# The git boundary (.gitignore) and the Docker build-context boundary are not
-# the same: Docker only honors .dockerignore. Without this file a build run
-# after the documented .env is created would pull live CLOUDFLARE_API_TOKEN /
-# CROWDSEC_BOUNCER_KEY values, the local Caddyfile, and persisted ./data into
-# the build context even though the Dockerfile never COPYs them.
-#
-# Allow-list form: exclude everything, then re-include only the paths the
-# Dockerfile actually reads from the build context:
-#   COPY tests/ ...
-#   COPY Caddyfile.example ...
-#   COPY Caddyfile.plugins.example ...
+# `.gitignore` has no bearing on a build context, so the paths it leaves untracked
+# (local secrets, the local Caddyfile, persisted data) would otherwise reach the daemon.
+# A new COPY from the build context needs a matching `!` re-include here.
 *
 !Caddyfile.example
 !Caddyfile.plugins.example

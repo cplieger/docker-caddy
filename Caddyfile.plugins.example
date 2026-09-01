@@ -1,8 +1,8 @@
 # Example Caddyfile for ghcr.io/cplieger/docker-caddy using both bundled plugins.
 #
-# Usage: copy this file to `Caddyfile` (the name compose.yaml mounts at
-# /etc/caddy/Caddyfile):
-#     cp Caddyfile.plugins.example Caddyfile
+# Usage: copy this file to `caddy/Caddyfile` (compose.yaml mounts the ./caddy
+# DIRECTORY at /etc/caddy):
+#     mkdir -p caddy && cp Caddyfile.plugins.example caddy/Caddyfile
 #
 # Then make three edits:
 #   1. the site address;
@@ -25,7 +25,7 @@
 	# The bouncer registers no directive order, so a site-block `crowdsec`
 	# needs one stated here.
 	order crowdsec first
-	# Registers Caddy's per-request HTTP instrumentation, which alerts.yaml's
+	# Registers Caddy's per-route HTTP instrumentation, which alerts.yaml's
 	# CaddyHigh5xxRate reads. Caddy documents a throughput cost on very busy
 	# servers, so delete this line to decline it; the 5xx rule then has no
 	# series and cannot fire.
@@ -40,10 +40,15 @@
 	}
 }
 
+:2020 {
+	metrics /metrics
+}
+
 # /health must live in an explicit `http://:80` block: Caddy auto-redirects :80 -> :443
 # for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
 http://:80 {
 	respond /health 200
+	respond 404
 }
 
 *.example.com {
