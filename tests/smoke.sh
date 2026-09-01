@@ -1,30 +1,18 @@
 #!/bin/sh
-# Build-time smoke test for docker-caddy.
-#
-# Runs in the Dockerfile `test` stage (FROM the xcaddy builder), so the
-# centralized `ci / validate` docker build-ability gate executes it on every
-# PR and push. The real failure mode for a custom xcaddy build is a plugin
-# silently dropping out of the binary, so this asserts both bundled plugins are
-# compiled in, and that both shipped example Caddyfiles validate against the
-# build, including the one that uses both plugins.
-#
-# Run locally:  sh tests/smoke.sh   (needs the plugin-built caddy on PATH)
 set -eu
 
 d=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 caddy="${CADDY_BIN:-caddy}"
 fail=0
-log() { printf '%s\n' "$*"; }     # final verdict -> stdout
-err() { printf '%s\n' "$*" >&2; } # failures + captured output -> stderr
+log() { printf '%s\n' "$*"; }
+err() { printf '%s\n' "$*" >&2; }
 
-# 1. The binary runs.
 if ! out=$("$caddy" version 2>&1); then
   err "FAIL: 'caddy version' did not run"
   err "$out"
   fail=1
 fi
 
-# 2. Both bundled plugins are actually compiled in (the xcaddy failure mode).
 if ! mods=$("$caddy" list-modules 2>&1); then
   err "FAIL: 'caddy list-modules' did not run"
   err "$mods"
@@ -40,9 +28,7 @@ else
   fi
 fi
 
-# 3. The shipped example Caddyfile validates against this build.
-# In the Docker test stage Caddyfile.example is copied beside this script
-# (into tests/); for a local `sh tests/smoke.sh` run it lives at the repo root.
+# The test stage copies examples beside this script; local runs use the repo root.
 example="$d/Caddyfile.example"
 [ -f "$example" ] || example="$d/../Caddyfile.example"
 if ! out=$("$caddy" validate --adapter caddyfile --config "$example" 2>&1); then
@@ -51,12 +37,7 @@ if ! out=$("$caddy" validate --adapter caddyfile --config "$example" 2>&1); then
   fail=1
 fi
 
-# 4. Negative control: a malformed Caddyfile MUST be rejected. Step 3 only
-#    proves 'caddy validate' accepts a good config; on its own that goes vacuous
-#    if validate ever no-ops or exits 0 without parsing. Asserting a non-zero
-#    exit on a broken config keeps the gate live and is wording-independent (it
-#    checks the exit code, not a specific adapter error string). An unclosed
-#    site block is a pure syntax error no caddy version can accept.
+# Reject a malformed config so validation cannot become vacuous.
 bad=$(mktemp)
 trap 'rm -f "$bad"' EXIT
 printf '%s\n' ':80 {' >"$bad"
@@ -65,20 +46,7 @@ if "$caddy" validate --adapter caddyfile --config "$bad" >/dev/null 2>&1; then
   fail=1
 fi
 
-# 5. The shipped plugins example adapts, and each plugin refuses a missing
-#    credential. Steps 2 and 3 do not cover this: step 2 proves only that the
-#    modules are registered, and Caddyfile.example carries no plugin directive
-#    at all, so no config those steps adapt exercises `dns cloudflare` or
-#    `crowdsec`. A Caddy handler directive with no registered order is refused
-#    at adapt time and the bundled bouncer registers none, so this is the
-#    assertion that catches a documented plugin config that cannot load. The
-#    credentials are supplied per invocation rather than committed, and never
-#    taken from the caller's environment, so a local run touches no real token.
-#    The negative controls re-run the same file with each credential empty: the
-#    cloudflare provider validates the token's FORMAT at provision time and the
-#    crowdsec app refuses an empty API key. A negative control that passes
-#    means step 5 is vacuous. `caddy validate` provisions without starting, so
-#    no CrowdSec LAPI is contacted.
+# Validate plugin directives with dummy credentials, never caller secrets.
 plugins="$d/Caddyfile.plugins.example"
 [ -f "$plugins" ] || plugins="$d/../Caddyfile.plugins.example"
 cf_token=$(printf 'cfut_%032d' 0)
@@ -89,10 +57,8 @@ if ! out=$(CLOUDFLARE_API_TOKEN="$cf_token" CROWDSEC_BOUNCER_KEY="$cs_key" \
   err "$out"
   fail=1
 fi
-# Each negative control puts the emptied variable LAST in the assignment prefix.
-# An emptied assignment followed by another variable name on the same line makes
-# gitleaks read that trailing name as a high-entropy value and fail the secret
-# scan on a line that carries nothing.
+# Empty credentials keep the plugin success check non-vacuous.
+# Keep empty assignments last; gitleaks treats a following variable as a secret value.
 if CROWDSEC_BOUNCER_KEY="$cs_key" CLOUDFLARE_API_TOKEN='' \
   "$caddy" validate --adapter caddyfile --config "$plugins" >/dev/null 2>&1; then
   err "FAIL: Caddyfile.plugins.example validated with an empty CLOUDFLARE_API_TOKEN"
@@ -104,10 +70,7 @@ if CLOUDFLARE_API_TOKEN="$cf_token" CROWDSEC_BOUNCER_KEY='' \
   fail=1
 fi
 
-# 6. Both shipped examples are `caddy fmt` clean. Steps 3 and 5 cannot see this:
-#    the caddyfile adapter reports unformatted input as a WARNING and `caddy
-#    validate` still exits 0, so an example that ships dirty warns on every start
-#    and every reload of the copy an operator made from it.
+# caddy validate permits formatting warnings.
 for cfg in "$example" "$plugins"; do
   if ! out=$("$caddy" fmt --diff "$cfg" 2>&1); then
     err "FAIL: 'caddy fmt --diff' reports $cfg is not formatted"
