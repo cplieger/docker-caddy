@@ -19,7 +19,7 @@ RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 # Asserts /probe's exit-code contract (2 usage, 1 unreachable): the HEALTHCHECK below reads those codes and HEALTH_PROBE_VERSION is Renovate-bumped.
 FROM base AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health/probe
-ARG HEALTH_PROBE_VERSION=v1.0.3
+ARG HEALTH_PROBE_VERSION=v1.0.4
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
