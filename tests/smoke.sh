@@ -109,6 +109,8 @@ if ! (
   route_log="$route_dir/caddy.log"
   extended="$route_dir/Caddyfile.extended"
   ordered="$route_dir/Caddyfile.ordered"
+  ahead="$route_dir/Caddyfile.ahead"
+  admin_env=127.0.0.1:2099
   route_fail=0
 
   start_route_config() {
@@ -203,6 +205,41 @@ if ! (
     route_fail=1
   elif start_route_config "$ordered"; then
     assert_route_status http://127.0.0.1:80/metrics 404
+    stop_route_config
+  fi
+
+  # The pair pins Caddy v2.11.4 admin.go:64,1391-1398: the default is already
+  # localhost:2019, so the first arm alone cannot prove CADDY_ADMIN was read.
+  # Prefix scope is measured non-persistent in this file's shells; POSIX leaves
+  # it unspecified, and persistence makes the next bare stop fail loudly.
+  if CADDY_ADMIN="$admin_env" start_route_config "$example"; then
+    assert_route_status http://127.0.0.1:2019/config/ 200
+    if curl -fsS "http://$admin_env/config/" >/dev/null 2>&1; then
+      err 'FAIL: CADDY_ADMIN moved the admin API off the configured localhost:2019 (precedence inverted)'
+      route_fail=1
+    fi
+    stop_route_config
+  fi
+  if CADDY_ADMIN="$admin_env" start_route_config "$plugins_health"; then
+    assert_route_status "http://$admin_env/config/" 200
+    if ! "$caddy" stop --address "$admin_env" >/dev/null 2>&1; then
+      err 'FAIL: caddy did not stop after the CADDY_ADMIN control'
+      cat "$route_log" >&2
+      route_fail=1
+    fi
+  fi
+
+  # `handle` is the tightest of the seven directives documented ahead of
+  # `respond`, so this falls first if `respond` moves ahead of the routing group.
+  # A lone move of header, redir, rewrite, basic_auth, forward_auth or encode is
+  # not witnessed here.
+  awk '/^http:\/\/:80 \{$/ { print; print "\thandle /ahead {"; print "\t\trespond 200"; print "\t}"; next } { print }' \
+    "$example" >"$ahead"
+  if ! grep -qF 'handle /ahead {' "$ahead"; then
+    err "FAIL: could not add a handle block to the example's http://:80 block (vacuous control?)"
+    route_fail=1
+  elif start_route_config "$ahead"; then
+    assert_route_status http://127.0.0.1:80/ahead 200
     stop_route_config
   fi
 
