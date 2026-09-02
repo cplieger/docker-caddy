@@ -59,7 +59,7 @@
 # Thresholds, `for:` windows, and the severity labels are starting points;
 # adjust them to your deployment. The scrape `job` label is yours to set, so
 # it is left out of the selectors that read Caddy's own registry. It is
-# REQUIRED on the reachability pair above, which reads the synthetic `up`
+# REQUIRED on the reachability pair below, which reads the synthetic `up`
 # series: a bare `up == 0` fires on every unrelated target in your Prometheus,
 # and `absent()` derives its labels from an equality matcher, so `job` has to
 # be there and is yours to set.
@@ -75,16 +75,14 @@ groups:
           summary: "Caddy is not being scraped successfully"
           description: >
             Caddy has had no successful scrape for 15 minutes, so the proxy is
-            either down or unreachable from the scraper. Every other metric
-            rule in this group is blind at the same time. Set the `job` matcher
-            to the name that your scrape config uses for Caddy. The `up` series
-            belongs to Prometheus: it creates one series for each configured
-            target. The minimal Caddyfile.example opens no metrics listener, so
-            a log-only deployment has no reachability signal for these rules.
-            If a target is configured but cannot be scraped, this rule fires
-            forever. If no target exists, CaddyTargetAbsent fires forever. If
-            your deployment is log-only, load alerts/logql.yaml and leave both
-            reachability rules out.
+            either down or unreachable from the scraper. Every rule that reads
+            Caddy's own registry is blind at the same time. Set the `job`
+            matcher to the name that your scrape config uses for Caddy. The
+            `up` series belongs to Prometheus: it creates one series for each
+            configured target. If a target is configured but cannot be
+            scraped, this rule fires forever. If no target exists,
+            CaddyTargetAbsent fires forever. If your deployment is log-only,
+            load alerts/logql.yaml and leave both reachability rules out.
       - alert: CaddyTargetAbsent
         expr: absent(up{job="caddy"})
         for: 15m
@@ -95,9 +93,12 @@ groups:
           description: >
             There is no `up{job="caddy"}` series, so Caddy is not a configured
             target. The target was dropped, its scrape config was removed, or
-            its pod was deleted. This is the arm that a deployment with no
-            Caddy scrape target reaches. CaddyTargetDown explains when to leave
-            both reachability rules out.
+            its pod was deleted. It also fires when this matcher does not name
+            your scrape job, in which case Caddy may be scraped and healthy
+            under another name - adapt `job="caddy"` on both reachability rules
+            to whatever your scrape config calls Caddy. This is the arm that a
+            deployment with no Caddy scrape target reaches. CaddyTargetDown
+            explains when to leave both reachability rules out.
       - alert: CaddyUpstreamUnhealthy
         expr: caddy_reverse_proxy_upstreams_healthy == 0
         for: 5m

@@ -94,13 +94,18 @@ groups:
             A certificate-management job ended in an error, which
             CaddyCertIssuanceFailed cannot see. certmagic reports this on the
             base `tls` logger once per failed job, rather than under
-            `tls.obtain` or `tls.renew`, so one event triggers this rule. Three
-            causes reach it, all outside the retry loop. A storage readiness
+            `tls.obtain` or `tls.renew`, so one event triggers this rule. Most
+            causes reach it from outside the retry loop. A storage readiness
             check can fail before certmagic contacts the issuer if `/data` is
             unwritable, unreadable, or full. This stops both issuance and
             renewal, so check that volume first. A certificate lock can also
             fail, or certmagic can mark an error as not worth retrying, such as
-            when it renews a certificate but cannot load it into memory. Retry
+            when it renews a certificate but cannot load it into memory. It
+            marks an ISSUER error that way too: every attempt after the first is
+            made against the ACME issuer's TEST endpoint, Let's Encrypt staging
+            while the CA is left at its default, and one that succeeds there
+            while the production endpoint then refuses the same order ENDS the
+            retries, so read the `error` field before you check the volume. Retry
             exhaustion does not reach this rule: certmagic logs `final attempt;
             giving up` and returns no error, so CaddyCertIssuanceFailed reports
             that arm. A successful config load cancels the outgoing config's
