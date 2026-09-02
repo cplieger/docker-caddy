@@ -15,12 +15,6 @@ fail=0
 log() { printf '%s\n' "$*"; }
 err() { printf '%s\n' "$*" >&2; }
 
-if ! out=$("$caddy" version 2>&1); then
-  err "FAIL: 'caddy version' did not run"
-  err "$out"
-  fail=1
-fi
-
 if ! mods=$("$caddy" list-modules 2>&1); then
   err "FAIL: 'caddy list-modules' did not run"
   err "$mods"
@@ -45,12 +39,17 @@ if ! out=$("$caddy" validate --adapter caddyfile --config "$example" 2>&1); then
   fail=1
 fi
 
-# Reject a malformed config so validation cannot become vacuous.
+# Reject a malformed config and pin the raw startup prefix alerts.yaml selects.
+# Driven through `caddy run`, the image's own CMD, because that produces the
+# prefix. The timeout bounds a build that accepts this file and serves forever.
+# Its exit status is deliberately ignored because GNU and BusyBox differ.
 bad=$(mktemp)
 trap 'rm -f "$bad"' EXIT
 printf '%s\n' ':80 {' >"$bad"
-if "$caddy" validate --adapter caddyfile --config "$bad" >/dev/null 2>&1; then
-  err "FAIL: 'caddy validate' accepted a malformed Caddyfile (vacuous gate?)"
+out=$(timeout 10 "$caddy" run --adapter caddyfile --config "$bad" 2>&1) || true
+if ! printf '%s\n' "$out" | grep -q '^Error: '; then
+  err "FAIL: 'caddy run' on a malformed Caddyfile did not emit the Error: prefix alerts.yaml selects"
+  err "$out"
   fail=1
 fi
 
@@ -77,6 +76,18 @@ if CLOUDFLARE_API_TOKEN="$cf_token" CROWDSEC_BOUNCER_KEY='' \
   err "FAIL: Caddyfile.plugins.example validated with an empty CROWDSEC_BOUNCER_KEY"
   fail=1
 fi
+
+for cfg in "$example" "$plugins"; do
+  if ! adapted=$("$caddy" adapt --adapter caddyfile --config "$cfg" 2>&1); then
+    err "FAIL: 'caddy adapt' rejected $cfg while checking the admin bind"
+    err "$adapted"
+    fail=1
+  elif ! printf '%s\n' "$adapted" \
+    | grep -qE '"listen":[[:space:]]*"localhost:2019"'; then
+    err "FAIL: $cfg does not explicitly adapt the admin API to localhost:2019"
+    fail=1
+  fi
+done
 
 # caddy validate permits formatting warnings.
 for cfg in "$example" "$plugins"; do
@@ -136,27 +147,39 @@ if ! (
     fi
   }
 
-  # Pin the UNDRIVEN example to the driven one. Caddyfile.plugins.example is
-  # deliberately never started (its `*.example.com` block enters the TLS app's
-  # automation set), so the only cheap detector for "its health or fallback
-  # response changed" is that its `http://:80` block is byte-identical to the one
-  # part B does drive -- an invariant both example files are maintained under.
-  # Asserted non-empty first, so a stopped awk match cannot pass as agreement.
-  block_of() {
-    awk '/^http:\/\/:80 \{$/ { p = 1 } p { print } p && /^\}$/ { exit }' "$1"
-  }
-  block_of "$example" >"$route_dir/block-example"
-  block_of "$plugins" >"$route_dir/block-plugins"
-  if [ ! -s "$route_dir/block-example" ] || [ ! -s "$route_dir/block-plugins" ]; then
-    err "FAIL: could not extract an http://:80 block from both examples (vacuous control?)"
+  metrics_cfg="$route_dir/Caddyfile.metrics"
+  metrics_out="$route_dir/metrics"
+  awk '/^:2020 \{$/ { p = 1 } p { print } p && /^\}$/ { exit }' \
+    "$plugins" >"$metrics_cfg"
+  if [ ! -s "$metrics_cfg" ]; then
+    err "FAIL: could not extract the shipped :2020 metrics listener"
     route_fail=1
-  elif ! cmp -s "$route_dir/block-example" "$route_dir/block-plugins"; then
-    err "FAIL: the examples' http://:80 blocks have diverged; the undriven plugins example is pinned to the driven one"
-    diff "$route_dir/block-example" "$route_dir/block-plugins" >&2 || true
-    route_fail=1
+  elif start_route_config "$metrics_cfg"; then
+    if ! curl -fsS http://127.0.0.1:2020/metrics >"$metrics_out"; then
+      err "FAIL: the shipped :2020/metrics listener did not answer"
+      route_fail=1
+    elif ! grep -qF 'caddy_config_last_reload_successful' "$metrics_out"; then
+      err "FAIL: the shipped :2020/metrics listener did not serve Caddy's registry"
+      route_fail=1
+    fi
+    stop_route_config
   fi
 
   if start_route_config "$example"; then
+    assert_route_status http://127.0.0.1:80/health 200
+    assert_route_status http://127.0.0.1:80/unmatched 404
+    stop_route_config
+  fi
+
+  # Drive the undriven example's own :80 block. Caddyfile.plugins.example is
+  # never started whole because its wildcard site enters TLS automation.
+  plugins_health="$route_dir/Caddyfile.plugins-health"
+  awk '/^http:\/\/:80 \{$/ { p = 1 } p { print } p && /^\}$/ { exit }' \
+    "$plugins" >"$plugins_health"
+  if [ ! -s "$plugins_health" ]; then
+    err "FAIL: could not extract the http://:80 block from the plugins example (vacuous control?)"
+    route_fail=1
+  elif start_route_config "$plugins_health"; then
     assert_route_status http://127.0.0.1:80/health 200
     assert_route_status http://127.0.0.1:80/unmatched 404
     stop_route_config
@@ -303,7 +326,7 @@ EOF
     grep '^caddy_http_request_duration_seconds_count{' "$signal_metrics" \
       >"$signal_dir/duration-series" || true
 
-    require_alert_runtime caddy_config_last_reload_successful caddy_config_last_reload_successful "$signal_metrics"
+    require_alert_runtime 'caddy_config_last_reload_successful == 0' caddy_config_last_reload_successful "$signal_metrics"
     require_alert_runtime 'caddy_reverse_proxy_upstreams_healthy == 0' caddy_reverse_proxy_upstreams_healthy "$signal_metrics"
     # This is a literal Prometheus template token, not a shell expansion.
     # shellcheck disable=SC2016
@@ -316,7 +339,7 @@ EOF
     require_alert_runtime 'crowdsec_bouncer_lapi_requests_failures_total{mode="stream"}' crowdsec_bouncer_lapi_requests_failures_total "$signal_metrics"
     require_alert_runtime 'crowdsec_bouncer_lapi_requests_total{mode="stream"}' crowdsec_bouncer_lapi_requests_total "$signal_metrics"
     require_alert_runtime 'logger="crowdsec"' '"logger":"crowdsec"' "$signal_log"
-    require_alert_runtime 'level="error"' '"level":"error"' "$signal_log"
+    require_alert_runtime 'logger="crowdsec" | level="error"' '"level":"error"' "$signal_log"
 
     if ! grep -qF 'tls\\.(obtain|renew)' "$signal_alerts"; then
       err 'FAIL: alerts.yaml no longer selects both certmagic failure loggers'
@@ -338,7 +361,7 @@ EOF
       signal_i=$((signal_i + 1))
       sleep 1
     done
-    require_alert_runtime 'unable to load latest config' 'unable to load latest config' "$signal_log"
+    require_alert_runtime '|= "unable to load latest config"' 'unable to load latest config' "$signal_log"
     require_alert_runtime 'logger="watcher"' '"logger":"watcher"' "$signal_log"
 
     if ! "$caddy" stop >/dev/null 2>&1; then

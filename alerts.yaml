@@ -1,5 +1,5 @@
 # Recommended alert rules for docker-caddy. MIXED rule group: four rules are
-# PromQL and four are LogQL, because Caddy carries its operational state in two
+# PromQL and five are LogQL, because Caddy carries its operational state in two
 # places and a condition with no series still has a log line.
 #
 # The four PromQL rules read one metric registry. The loopback admin endpoint
@@ -33,7 +33,7 @@
 # block on its listener, is flattened to one non-terminal route per
 # directive, so a request is observed once per matched route and the
 # `handler` label is what keeps the number a request share.
-# `metrics { per_host }` option adds the `host` label, which the expression
+# The `metrics { per_host }` option adds the `host` label, which the expression
 # preserves automatically and which turns the rule per-vhost, at the
 # cardinality and memory cost Caddy's own documentation for the option names.
 # CaddyCrowdSecLAPIFailing reads the bouncer's LAPI counters, and the bouncer
@@ -46,13 +46,13 @@
 # is a LAPI REACHABILITY check rather than a verdict read, since it pings the
 # LAPI through the live bouncer and inspects no decision.
 #
-# Three of the four LogQL rules (CaddyCertIssuanceFailed,
+# Three of the five LogQL rules (CaddyCertIssuanceFailed,
 # CaddyCrowdSecLAPIPollFailed, CaddyConfigWatcherStopped) read the container's
 # log stream, because their condition has no series to read: Caddy registers no
 # certificate, ACME or expiry series at all, the bouncer's counters need the
 # option above while its log line needs nothing, and a stopped config watcher
 # never moves the reload gauge. Ship the container's logs to Loki and evaluate
-# all four with Loki's ruler; firing alerts deliver through your
+# all five with Loki's ruler; firing alerts deliver through your
 # Alertmanager exactly like the metric ones. Their shared prerequisites are the
 # log ENCODING and the log DESTINATION. Caddy writes JSON whenever stderr is
 # not an interactive terminal, which is the container default, so `| json`
@@ -63,10 +63,11 @@
 # so `level="error"` and never `level="ERROR"`. A global `log` block that sends
 # the default logger to a file takes these lines off stderr, and then none of the
 # three matches anything, whatever is failing: leave the default logger on
-# stderr, or tail that file with your collector. CaddyStartupFailed is the one
-# LogQL rule that needs neither prerequisite: the CLI prints its line on stderr
-# before Caddy's logger exists, so no `log` block can move it off stderr (the
-# encoding half is stated above).
+# stderr, or tail that file with your collector. CaddyReloadRejected needs the
+# log destination but not the encoding because it selects the raw message.
+# CaddyStartupFailed is the one LogQL rule that needs neither prerequisite: the
+# CLI prints its line on stderr before Caddy's logger exists, so no `log` block
+# can move it off stderr (the encoding half is stated above).
 #
 # Detection from OUTSIDE the container is still worth keeping for certificates,
 # and it is not redundant with CaddyCertIssuanceFailed: a TLS prober against
@@ -76,7 +77,7 @@
 # Thresholds, `for:` windows, and the severity labels are starting points; adjust
 # them to your deployment. The scrape `job` label is yours to set, so it is
 # intentionally left out of the metric selectors, and the `container` selector on
-# the four log rules is whatever your log collector sets (Grafana Alloy's Docker
+# the five log rules is whatever your log collector sets (Grafana Alloy's Docker
 # log discovery sets `container` with no configuration; Promtail and others may
 # key on `job` or `service` instead).
 groups:
@@ -109,14 +110,11 @@ groups:
             case is CaddyConfigWatcherStopped. At STARTUP that case is
             CaddyStartupFailed, and it is the arm a deployment on the image's
             own CMD hits first: the process exits before this gauge has a
-            series at all. For an explicit reload it is covered by nothing
-            here, and an explicit reload is the only reload path a deployment
-            has if it does not override the image CMD: a failed SIGUSR1 logs
-            `failed to reload config from file` at ERROR on
-            the DEFAULT logger, so it carries no `logger` field for the
-            selectors above, and `caddy reload` reports the parse error as an
-            exit status rather than into the container's log stream. The running
-            config stays stale either way.
+            series at all. For an explicit reload that case is
+            CaddyReloadRejected, which selects the ERROR line the signal
+            handler writes on the DEFAULT logger; `caddy reload` reports the
+            parse error as an exit status rather than into the container's log
+            stream. The running config stays stale either way.
       - alert: CaddyHigh5xxRate
         expr: >
           sum without (server, code, method) (rate(caddy_http_request_duration_seconds_count{code=~"5.."}[5m]))
@@ -211,20 +209,26 @@ groups:
         annotations:
           summary: "CrowdSec bouncer is logging LAPI errors"
           description: >
-            The bouncer logged more than 2 errors in 10 minutes. It polls the
-            LAPI decision stream every 60s by default and logs one ERROR line
-            per failed poll, so a threshold of 2 reaches an unreachable LAPI
-            within about 3 minutes while one lost poll stays quiet. The
-            selector is the log LEVEL under the `crowdsec` logger rather than a
-            message, because the failed poll logs the raw transport error and
-            has no stable string; any other repeating bouncer error trips the
-            same rule, so read the line. This rule needs no Caddyfile option at
-            all, which is what makes it the detector for a deployment that
-            leaves `enable_caddy_metrics` off; where it is set,
-            CaddyCrowdSecLAPIFailing reports the same outage as a rate. With
-            `enable_hard_fails` set the bouncer logs at FATAL and exits
-            instead, so the container restart is the signal there, not this
-            rule. Consequences for enforcement are the ones
+            The bouncer logged more than 2 errors in 10 minutes. It logs one
+            ERROR line per failed poll, and the cadence depends on whether a
+            stream was ever established. An established stream polls every 60s
+            by default, so a LAPI that starts failing reaches the threshold of
+            2 in about 2 to 3 minutes. A LAPI unreachable from startup is retried
+            on a 10s delay, so the third ERROR arrives about 20 seconds in when
+            the connect fails fast (a refused connection or a DNS failure
+            returns immediately, leaving only the two retry delays) and about
+            50 seconds in when the LAPI is blackholed, because each attempt also
+            spends its own 10s deadline before the delay starts. One lost poll
+            on an established stream stays quiet. The selector is the log LEVEL
+            under the `crowdsec` logger rather than a message, because the failed
+            poll logs the raw transport error and has no stable string; any other
+            repeating bouncer error trips the same rule, so read the line. This
+            rule needs no Caddyfile option at all, which is what makes it the
+            detector for a deployment that leaves `enable_caddy_metrics` off;
+            where it is set, CaddyCrowdSecLAPIFailing reports the same outage as
+            a rate. With `enable_hard_fails` set the bouncer logs at FATAL and
+            exits instead, so the container restart is the signal there, not
+            this rule. Consequences for enforcement are the ones
             CaddyCrowdSecLAPIFailing describes. Check the CrowdSec LAPI and the
             bouncer's `api_url` and `api_key`.
       - alert: CaddyConfigWatcherStopped
@@ -266,6 +270,43 @@ groups:
             window passes even though the condition does not; lengthen the
             window if you want it to sit longer. Deployments that do not
             override the image CMD never arm the watcher and never see this.
+
+      - alert: CaddyReloadRejected
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} |= "failed to reload config from file" [1h]
+          )) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Caddy rejected a config reload it was asked for"
+          description: >
+            A SIGUSR1 reload was refused, so the running config is the previous
+            one and the file on disk is not live. Read the structured `error`
+            field for which arm it was: `reading config from file:` is a missing
+            or unreadable file, `adapting config using caddyfile:` is a Caddyfile
+            that does not parse, and a `loading initial config` cause is a config
+            that read and adapted and then failed to apply. The first two leave
+            `caddy_config_last_reload_successful` at 1, because no in-process
+            load is attempted, so this rule is the only signal for them; the
+            third moves that gauge too, so CaddyConfigReloadFailed fires
+            alongside this rule there. This is the reload path a deployment on
+            the image's own CMD has, and the one arm the other config rules do
+            not reach: CaddyConfigWatcherStopped needs an opted-in `--watch`,
+            and CaddyStartupFailed only sees a failure at process start. The
+            proxy keeps serving the last good config and the healthcheck stays
+            green throughout. The line carries no `logger` field, because Caddy
+            reports it on the DEFAULT logger, which is why this rule selects the
+            message rather than a logger; it still shares the log-DESTINATION
+            prerequisite of the other log rules, so a global `log` block that
+            sends the default logger to a file takes it off stderr too. The line
+            is logged once per signal, so this reports the transition and clears
+            when the window passes. Recovery is to fix the file and send the
+            signal again; `caddy validate --adapter caddyfile --config <file>`
+            reaches the first two causes before you send it. A `caddy reload`
+            through `docker exec` is not covered here and does not need to be:
+            it reports the same failure as its own exit status.
 
       # No `| json` stage and no cause alternation, deliberately: cobra prints this
       # line before Caddy's JSON logger owns stderr, so a parser stage takes it out

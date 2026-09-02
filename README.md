@@ -130,8 +130,8 @@ Under Docker's defaults that is all: containers start with `net.ipv4.ip_unprivil
 
 The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's own prerequisites are stated in the file's header. The bundle is mixed, because Caddy carries its operational state in two places:
 
-- **Four rules read metrics**, served by the admin API's `/metrics` endpoint at `http://localhost:2019/metrics` (the example's `admin localhost:2019`), so keep the admin API enabled (it is on by default) and scrape it. That bind is loopback, so scrape from inside the container's network namespace (a monitoring sidecar) or scrape the routable listener the shipped `Caddyfile.plugins.example` already carries (`:2020`, in the Ports table above). Caddy's own series need nothing further; the bouncer's LAPI counters need `enable_caddy_metrics` in the `crowdsec` global block, which the shipped `Caddyfile.plugins.example` sets. Evaluate these with Prometheus or the Mimir ruler.
-- **Four rules read the container log**, because their condition registers no series at all. Ship the container's logs to Loki and evaluate those with [Loki's ruler](https://grafana.com/docs/loki/latest/alert/). Caddy encodes its log as JSON whenever stderr is not an interactive terminal, which is the container default, so `| json` parses the stream and `logger` and `level` are the selectors. Three of the four are that shape. `CaddyStartupFailed` is not: the CLI prints its line before that logger exists, so it carries no `logger` field and no `log` block can take it off stderr. One prerequisite is easy to miss: a global `log` block that sends the default logger to a file takes these lines off stderr, and none of the three then matches anything. Leave the default logger on stderr, or tail that file with your collector.
+- **Four rules read metrics**, served by the admin API's `/metrics` endpoint at `http://localhost:2019/metrics` (the example's `admin localhost:2019`), so keep the admin API enabled (it is on by default) and scrape it. That bind is loopback, so scrape from inside the container's network namespace (a monitoring sidecar) or scrape the routable listener the shipped `Caddyfile.plugins.example` already carries (`:2020`, in the Ports table above). Only `CaddyConfigReloadFailed` needs nothing further. `CaddyHigh5xxRate` needs the `metrics` global option, which is what registers the per-route HTTP instrumentation it reads and which the shipped `Caddyfile.plugins.example` sets. `CaddyUpstreamUnhealthy` needs active or passive health checks on your own `reverse_proxy`, which neither shipped example configures, and without them its series stays at 1 and the rule cannot fire. The bouncer's LAPI counters need `enable_caddy_metrics` in the `crowdsec` global block, which the shipped example does set. `Caddyfile.example` carries none of the three, so it gives `CaddyConfigReloadFailed` input and nothing else. Evaluate these with Prometheus or the Mimir ruler.
+- **Five rules read the container log**, because their condition registers no series at all. Ship the container's logs to Loki and evaluate those with [Loki's ruler](https://grafana.com/docs/loki/latest/alert/). Caddy encodes its log as JSON whenever stderr is not an interactive terminal, which is the container default, so `| json` parses the stream and `logger` and `level` are the selectors. Three of the five are that shape. `CaddyReloadRejected` selects a message rather than a logger because Caddy reports it on the default logger. `CaddyStartupFailed` is different again: the CLI prints its line before that logger exists, so it carries no `logger` field and no `log` block can take it off stderr. One prerequisite is easy to miss: a global `log` block that sends the default logger to a file takes these lines off stderr, and none of the four then matches anything. Leave the default logger on stderr, or tail that file with your collector.
 
 Firing alerts deliver through your Alertmanager either way. They cover:
 
@@ -144,15 +144,30 @@ Firing alerts deliver through your Alertmanager either way. They cover:
 | `CaddyCertIssuanceFailed` | Caddy logs more than 2 certificate errors in an hour while getting or renewing one | warning |
 | `CaddyCrowdSecLAPIPollFailed` | the bouncer logs more than 2 LAPI errors in 10 minutes, needing no Caddyfile option | warning |
 | `CaddyConfigWatcherStopped` | an opted-in `--watch` could not read or adapt the config file, so the watcher stopped and later edits are ignored | critical |
+| `CaddyReloadRejected` | a requested config reload was refused, so the file on disk is not the running config | critical |
 | `CaddyStartupFailed` | Caddy exits during startup, before it serves anything | critical |
 
-Thresholds and the `severity` labels are starting points; add your scrape `job` label to the metric selectors if you scrape more than one instance, adjust the `container` selector on the four log rules to whatever your log collector sets, and route by whatever labels your Alertmanager uses.
+Thresholds and the `severity` labels are starting points; add your scrape `job` label to the metric selectors if you scrape more than one instance, adjust the `container` selector on the five log rules to whatever your log collector sets, and route by whatever labels your Alertmanager uses.
 
 No metric covers certificate renewal, because Caddy registers no certificate, ACME or expiry series. The log does: certmagic reports a failure at ERROR under `tls.renew` for a renewal and `tls.obtain` for a first issuance, as `could not get certificate from issuer` once per issuer per attempt, then `will retry` or `final attempt; giving up`. `CaddyCertIssuanceFailed` matches those. Keep a TLS prober against the served site as well (blackbox_exporter's `probe_ssl_earliest_cert_expiry`), because it catches the one case that logs nothing: a renewal that is never attempted.
 
 ## Healthcheck
 
 The image ships a **liveness** healthcheck: the bundled `/probe` binary (from [`cplieger/health`](https://github.com/cplieger/health); the runtime has no shell or wget) GETs Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up and the admin plane is responsive (it catches faults like a hung reload that keep serving traffic while the admin API is dead). It does not confirm a config is loaded: `GET /config/` answers 200 with a body of `null` once the config has been stopped or deleted, and the probe reads the status only. Under this image's own command a config that fails to load exits the process, so reaching that state takes a command override or a `DELETE /config/`; `caddy_config_last_reload_successful`, which the shipped `CaddyConfigReloadFailed` rule keys on, is what covers it. The probe works out of the box for **any** Caddyfile; no route configuration required.
+
+Each probe is an admin-API request, and Caddy logs every admin-API request except `/metrics` at INFO on the `admin.api` logger: one ~200-byte record per interval, 2880 a day at the baked 30s interval, for the life of the container. With the minimal `Caddyfile.example`, which configures no per-site `log` and so has no access log, those records are the whole steady-state content of the stream the [Alerting](#alerting) section asks you to ship to Loki. No shipped rule selects them, so alerting is unaffected; the cost is volume and readability. To drop them without losing the admin plane's own errors, configure two logs in your global options block:
+
+```caddy
+log {
+	exclude admin.api
+}
+log adminerrors {
+	include admin.api
+	level ERROR
+}
+```
+
+Caddy admits a message into every log whose include/exclude list accepts it, and each log has its own minimum level, so the first block takes the INFO records off the default log while the second keeps the `admin.api` ERROR records a failing admin request emits. `output` defaults to stderr and `format` to JSON off a terminal, so neither block needs either. A lone `log { exclude admin.api }` is level-blind and drops the ERROR records too.
 
 > **Note:** the default probe hits Caddy's admin API. If your Caddyfile sets `admin off` or rebinds the admin endpoint, this probe fails even though Caddy is serving normally; switch to the end-to-end `/health` override below in that case.
 

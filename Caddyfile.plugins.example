@@ -53,7 +53,7 @@
 # for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
 # The trailing `respond 404` is a matcherless terminal handler, and `respond` sorts
 # ahead of `metrics`, `reverse_proxy`, `php_fastcgi`, `file_server` and `acme_server`.
-# A handler directive added to THIS block therefore answers nothing, with no adapt
+# One of THOSE five added to THIS block therefore answers nothing, with no adapt
 # or validate error, and a matcher of its own does not change that: Caddy orders by
 # DIRECTIVE, not by line. Give it its own site block, or wrap it in a `route`, which
 # sorts ahead of `respond` and honours the order written inside it. Directives that
