@@ -25,19 +25,19 @@
 	# The bouncer registers no directive order, so a site-block `crowdsec`
 	# needs one stated here.
 	order crowdsec first
-	# Registers Caddy's per-route HTTP instrumentation, which alerts.yaml's
-	# CaddyHigh5xxRate reads. Caddy documents a throughput cost on very busy
-	# servers, so delete this line to decline it; the 5xx rule then has no
-	# series and cannot fire.
+	# Registers Caddy's per-route HTTP instrumentation, which
+	# alerts/promql.yaml's CaddyHigh5xxRate reads. Caddy documents a throughput
+	# cost on very busy servers, so delete this line to decline it; the 5xx rule
+	# then has no series and cannot fire.
 	metrics
 
 	crowdsec {
 		api_url http://crowdsec:8080
 		api_key {env.CROWDSEC_BOUNCER_KEY}
-		# Registers the bouncer's LAPI counters, which alerts.yaml's
-		# CaddyCrowdSecLAPIFailing reads. They land on the shared metrics
-		# registry, so both the loopback admin endpoint and the `:2020`
-		# listener below serve them.
+		# Registers the bouncer's LAPI counters, which
+		# alerts/promql.yaml's CaddyCrowdSecLAPIFailing reads. They land on the
+		# shared metrics registry, so both the loopback admin endpoint and the
+		# `:2020` listener below serve them.
 		enable_caddy_metrics
 	}
 }
@@ -69,10 +69,11 @@ http://:80 {
 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
 	crowdsec
-	# No health checks are configured on the `reverse_proxy`, so alerts.yaml's
-	# CaddyUpstreamUnhealthy cannot fire against this example. Both controls are
-	# reverse_proxy subdirectives, not site directives, so expand the one-liner
-	# below into `reverse_proxy backend:3000 { ... }` and put
+	# No health checks are configured on the `reverse_proxy`, so
+	# alerts/promql.yaml's CaddyUpstreamUnhealthy cannot fire against this
+	# example. Both controls are reverse_proxy subdirectives, not site
+	# directives, so expand the one-liner below into
+	# `reverse_proxy backend:3000 { ... }` and put
 	# `fail_duration <duration>` (passive) or `health_uri <uri>` (active) inside
 	# the braces. Either one changes proxy behaviour on upstream errors.
 	reverse_proxy backend:3000
