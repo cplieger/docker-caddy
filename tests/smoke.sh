@@ -305,6 +305,8 @@ EOF
 
     require_alert_runtime caddy_config_last_reload_successful caddy_config_last_reload_successful "$signal_metrics"
     require_alert_runtime 'caddy_reverse_proxy_upstreams_healthy == 0' caddy_reverse_proxy_upstreams_healthy "$signal_metrics"
+    # This is a literal Prometheus template token, not a shell expansion.
+    # shellcheck disable=SC2016
     require_alert_runtime '{{ $labels.upstream }}' 'upstream=' "$signal_metrics"
     require_alert_runtime caddy_http_request_duration_seconds_count caddy_http_request_duration_seconds_count "$signal_metrics"
     require_rule_arms 'sum without (server, handler, code, method, host)' 1 'handler='
