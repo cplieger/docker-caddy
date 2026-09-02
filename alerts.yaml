@@ -1,5 +1,5 @@
 # Recommended alert rules for docker-caddy. MIXED rule group: four rules are
-# PromQL and three are LogQL, because Caddy carries its operational state in two
+# PromQL and four are LogQL, because Caddy carries its operational state in two
 # places and a condition with no series still has a log line.
 #
 # The four PromQL rules read one metric registry. The loopback admin endpoint
@@ -46,22 +46,27 @@
 # is a LAPI REACHABILITY check rather than a verdict read, since it pings the
 # LAPI through the live bouncer and inspects no decision.
 #
-# The three LogQL rules (CaddyCertIssuanceFailed,
+# Three of the four LogQL rules (CaddyCertIssuanceFailed,
 # CaddyCrowdSecLAPIPollFailed, CaddyConfigWatcherStopped) read the container's
 # log stream, because their condition has no series to read: Caddy registers no
 # certificate, ACME or expiry series at all, the bouncer's counters need the
 # option above while its log line needs nothing, and a stopped config watcher
 # never moves the reload gauge. Ship the container's logs to Loki and evaluate
-# those three with Loki's ruler; firing alerts deliver through your
+# all four with Loki's ruler; firing alerts deliver through your
 # Alertmanager exactly like the metric ones. Their shared prerequisites are the
 # log ENCODING and the log DESTINATION. Caddy writes JSON whenever stderr is
 # not an interactive terminal, which is the container default, so `| json`
-# parses the stream and the `logger` and `level` fields are the selectors (zap's
-# production encoder writes the level lowercase, so `level="error"` and never
-# `level="ERROR"`). A global `log` block that sends the default logger to a
-# file takes these lines off stderr, and then none of the three matches
-# anything, whatever is failing: leave the default logger on stderr, or tail
-# that file with your collector.
+# parses its LOG records - with one exception the rules must account for: a
+# startup failure is reported by the CLI itself, before that logger exists, as
+# a plain-text `Error: ...` line, which is what CaddyStartupFailed selects
+# without a parser stage. Zap's production encoder writes the level lowercase,
+# so `level="error"` and never `level="ERROR"`. A global `log` block that sends
+# the default logger to a file takes these lines off stderr, and then none of the
+# three matches anything, whatever is failing: leave the default logger on
+# stderr, or tail that file with your collector. CaddyStartupFailed is the one
+# LogQL rule that needs neither prerequisite: the CLI prints its line on stderr
+# before Caddy's logger exists, so no `log` block can move it off stderr (the
+# encoding half is stated above).
 #
 # Detection from OUTSIDE the container is still worth keeping for certificates,
 # and it is not redundant with CaddyCertIssuanceFailed: a TLS prober against
@@ -71,7 +76,7 @@
 # Thresholds, `for:` windows, and the severity labels are starting points; adjust
 # them to your deployment. The scrape `job` label is yours to set, so it is
 # intentionally left out of the metric selectors, and the `container` selector on
-# the three log rules is whatever your log collector sets (Grafana Alloy's Docker
+# the four log rules is whatever your log collector sets (Grafana Alloy's Docker
 # log discovery sets `container` with no configuration; Promtail and others may
 # key on `job` or `service` instead).
 groups:
@@ -101,10 +106,13 @@ groups:
             Note this gauge moves only when Caddy attempts to apply a config
             in-process. A config that fails to READ or ADAPT never reaches that
             attempt and leaves this gauge at 1. For an opted-in `--watch` that
-            case is CaddyConfigWatcherStopped. For an explicit reload it is
-            covered by nothing here, and an explicit reload is the only reload
-            path a deployment has if it does not override the image CMD: a
-            failed SIGUSR1 logs `failed to reload config from file` at ERROR on
+            case is CaddyConfigWatcherStopped. At STARTUP that case is
+            CaddyStartupFailed, and it is the arm a deployment on the image's
+            own CMD hits first: the process exits before this gauge has a
+            series at all. For an explicit reload it is covered by nothing
+            here, and an explicit reload is the only reload path a deployment
+            has if it does not override the image CMD: a failed SIGUSR1 logs
+            `failed to reload config from file` at ERROR on
             the DEFAULT logger, so it carries no `logger` field for the
             selectors above, and `caddy reload` reports the parse error as an
             exit status rather than into the container's log stream. The running
@@ -258,3 +266,35 @@ groups:
             window passes even though the condition does not; lengthen the
             window if you want it to sit longer. Deployments that do not
             override the image CMD never arm the watcher and never see this.
+
+      # No `| json` stage and no cause alternation, deliberately: cobra prints this
+      # line before Caddy's JSON logger owns stderr, so a parser stage takes it out
+      # of the stream, and all three startup causes reach stderr behind the same
+      # `Error: ` prefix. Exit statuses above 1 are silenced by Caddy's cobra
+      # wrapper, so this prefix has no other producer under the image's own CMD.
+      - alert: CaddyStartupFailed
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} |~ `^Error: ` [15m]
+          )) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Caddy exited during startup"
+          description: >
+            Caddy exited before it served anything, so nothing is being served at
+            all and no metric series exists to report it: the process ends before
+            the admin endpoint or a `metrics` listener binds. The line is the CLI's
+            own plain-text `Error: <cause>` on stderr, outside Caddy's JSON logger,
+            which is why this rule selects the raw line while the other log rules
+            parse JSON. Read the cause. `adapting config using caddyfile:` is a
+            Caddyfile that does not parse. `reading config from file:` is a missing
+            or unreadable file, which with a single-file bind mount also means the
+            mount source does not exist. `loading initial config:` is a config that
+            read and adapted and then failed to apply, so the cause is a module
+            that would not provision (a rejected credential, for instance) or an
+            address already in use. `caddy validate --adapter caddyfile --config
+            <file>` reaches the first two and the provisioning half of the third,
+            never an address conflict. With `restart: unless-stopped` the container
+            loops and the line repeats on every attempt.

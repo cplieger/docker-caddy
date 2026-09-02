@@ -42,6 +42,9 @@
 	}
 }
 
+# Unlike the loopback `admin` above, a site address with no host binds every
+# interface in the container, so anything on the same Docker network can read
+# these series.
 :2020 {
 	metrics /metrics
 }
@@ -50,8 +53,12 @@
 # for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
 # The trailing `respond 404` is a matcherless terminal handler, and `respond` sorts
 # ahead of `metrics`, `reverse_proxy`, `php_fastcgi`, `file_server` and `acme_server`.
-# A handler directive added to THIS block therefore answers nothing, with no adapt or
-# validate error: give it its own site block, or a matcher of its own above this line.
+# A handler directive added to THIS block therefore answers nothing, with no adapt
+# or validate error, and a matcher of its own does not change that: Caddy orders by
+# DIRECTIVE, not by line. Give it its own site block, or wrap it in a `route`, which
+# sorts ahead of `respond` and honours the order written inside it. Directives that
+# already sort ahead of `respond` (`header`, `redir`, `rewrite`, `basic_auth`,
+# `forward_auth`, `encode`, `handle`) need only a matcher.
 http://:80 {
 	respond /health 200
 	respond 404

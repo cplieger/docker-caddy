@@ -111,8 +111,9 @@ Reference either credential only as `{env.VAR}`, never as a literal in the Caddy
 | `443` | TCP | HTTPS / HTTP/2 |
 | `443` | UDP | HTTP/3 (QUIC) |
 | `2019` | TCP | Caddy's admin API (unauthenticated): loopback-bound by default, so publishing it reaches a listener that answers only inside the container |
+| `2020` | TCP | Prometheus metrics, only if your Caddyfile opens the listener |
 
-The admin API port is declared for documentation and for in-namespace scrapers; publishing it is only useful if a Caddyfile deliberately rebinds `admin` off loopback, and at that point it is an unauthenticated control plane on a routable address.
+The admin API port is declared for documentation and for in-namespace scrapers; publishing it is only useful if a Caddyfile deliberately rebinds `admin` off loopback, and at that point it is an unauthenticated control plane on a routable address. The `2020` listener is a Caddyfile decision rather than an image one: nothing in the image opens it, the shipped [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) does (`:2020 { metrics /metrics }`) and `Caddyfile.example` does not, and it is not in the image's `EXPOSE`. The compose example publishes no host port for it, but a site address with no host binds every interface in the container, so any container on the same Docker network can read the series.
 
 ### Running unprivileged
 
@@ -129,8 +130,8 @@ Under Docker's defaults that is all: containers start with `net.ipv4.ip_unprivil
 
 The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's own prerequisites are stated in the file's header. The bundle is mixed, because Caddy carries its operational state in two places:
 
-- **Four rules read metrics**, served by the admin API's `/metrics` endpoint at `http://localhost:2019/metrics` (the example's `admin localhost:2019`), so keep the admin API enabled (it is on by default) and scrape it. That bind is loopback, so scrape from inside the container's network namespace (a monitoring sidecar) or expose a routable listener with Caddy's [`metrics`](https://caddyserver.com/docs/caddyfile/directives/metrics) handler directive. Caddy's own series need nothing further; the bouncer's LAPI counters need `enable_caddy_metrics` in the `crowdsec` global block, which the shipped `Caddyfile.plugins.example` sets. Evaluate these with Prometheus or the Mimir ruler.
-- **Three rules read the container log**, because their condition registers no series at all. Ship the container's logs to Loki and evaluate those with [Loki's ruler](https://grafana.com/docs/loki/latest/alert/). Caddy encodes its log as JSON whenever stderr is not an interactive terminal, which is the container default, so `| json` parses the stream and `logger` and `level` are the selectors. One prerequisite is easy to miss: a global `log` block that sends the default logger to a file takes these lines off stderr, and none of the three then matches anything. Leave the default logger on stderr, or tail that file with your collector.
+- **Four rules read metrics**, served by the admin API's `/metrics` endpoint at `http://localhost:2019/metrics` (the example's `admin localhost:2019`), so keep the admin API enabled (it is on by default) and scrape it. That bind is loopback, so scrape from inside the container's network namespace (a monitoring sidecar) or scrape the routable listener the shipped `Caddyfile.plugins.example` already carries (`:2020`, in the Ports table above). Caddy's own series need nothing further; the bouncer's LAPI counters need `enable_caddy_metrics` in the `crowdsec` global block, which the shipped `Caddyfile.plugins.example` sets. Evaluate these with Prometheus or the Mimir ruler.
+- **Four rules read the container log**, because their condition registers no series at all. Ship the container's logs to Loki and evaluate those with [Loki's ruler](https://grafana.com/docs/loki/latest/alert/). Caddy encodes its log as JSON whenever stderr is not an interactive terminal, which is the container default, so `| json` parses the stream and `logger` and `level` are the selectors. Three of the four are that shape. `CaddyStartupFailed` is not: the CLI prints its line before that logger exists, so it carries no `logger` field and no `log` block can take it off stderr. One prerequisite is easy to miss: a global `log` block that sends the default logger to a file takes these lines off stderr, and none of the three then matches anything. Leave the default logger on stderr, or tail that file with your collector.
 
 Firing alerts deliver through your Alertmanager either way. They cover:
 
@@ -143,8 +144,9 @@ Firing alerts deliver through your Alertmanager either way. They cover:
 | `CaddyCertIssuanceFailed` | Caddy logs more than 2 certificate errors in an hour while getting or renewing one | warning |
 | `CaddyCrowdSecLAPIPollFailed` | the bouncer logs more than 2 LAPI errors in 10 minutes, needing no Caddyfile option | warning |
 | `CaddyConfigWatcherStopped` | an opted-in `--watch` could not read or adapt the config file, so the watcher stopped and later edits are ignored | critical |
+| `CaddyStartupFailed` | Caddy exits during startup, before it serves anything | critical |
 
-Thresholds and the `severity` labels are starting points; add your scrape `job` label to the metric selectors if you scrape more than one instance, adjust the `container` selector on the three log rules to whatever your log collector sets, and route by whatever labels your Alertmanager uses.
+Thresholds and the `severity` labels are starting points; add your scrape `job` label to the metric selectors if you scrape more than one instance, adjust the `container` selector on the four log rules to whatever your log collector sets, and route by whatever labels your Alertmanager uses.
 
 No metric covers certificate renewal, because Caddy registers no certificate, ACME or expiry series. The log does: certmagic reports a failure at ERROR under `tls.renew` for a renewal and `tls.obtain` for a first issuance, as `could not get certificate from issuer` once per issuer per attempt, then `will retry` or `final attempt; giving up`. `CaddyCertIssuanceFailed` matches those. Keep a TLS prober against the served site as well (blackbox_exporter's `probe_ssl_earliest_cert_expiry`), because it catches the one case that logs nothing: a renewal that is never attempted.
 
