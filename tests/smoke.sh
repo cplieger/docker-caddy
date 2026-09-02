@@ -304,7 +304,7 @@ if ! (
 http://:8082 {
   crowdsec
   reverse_proxy 127.0.0.1:9 {
-    fail_duration 1s
+    fail_duration 30s
   }
 }
 EOF
@@ -335,6 +335,10 @@ EOF
 
     require_alert_runtime 'caddy_config_last_reload_successful == 0' caddy_config_last_reload_successful "$signal_metrics"
     require_alert_runtime 'caddy_reverse_proxy_upstreams_healthy == 0' caddy_reverse_proxy_upstreams_healthy "$signal_metrics"
+    if ! grep -qE '^caddy_reverse_proxy_upstreams_healthy\{.*upstream="127\.0\.0\.1:9".*\} 0$' "$signal_metrics"; then
+      err 'FAIL: passive health checking did not mark 127.0.0.1:9 unhealthy'
+      signal_fail=1
+    fi
     # This is a literal Prometheus template token, not a shell expansion.
     # shellcheck disable=SC2016
     require_alert_runtime '{{ $labels.upstream }}' 'upstream=' "$signal_metrics"
@@ -345,8 +349,50 @@ EOF
     require_rule_arms 'sum without (server, code, method)' 2 'server='
     require_alert_runtime 'crowdsec_bouncer_lapi_requests_failures_total{mode="stream"}' 'crowdsec_bouncer_lapi_requests_failures_total{mode="stream"' "$signal_metrics"
     require_alert_runtime 'crowdsec_bouncer_lapi_requests_total{mode="stream"}' 'crowdsec_bouncer_lapi_requests_total{mode="stream"' "$signal_metrics"
-    require_alert_runtime 'logger="crowdsec"' '"logger":"crowdsec"' "$signal_log"
-    require_alert_runtime 'logger="crowdsec" | level="error"' '"level":"error"' "$signal_log"
+    if ! grep -qF 'logger="crowdsec" | level="error"' "$signal_alerts"; then
+      err 'FAIL: CaddyCrowdSecLAPIPollFailed no longer selects the crowdsec error conjunction'
+      signal_fail=1
+    elif ! awk 'index($0, "\"logger\":\"crowdsec\"") && index($0, "\"level\":\"error\"") { found = 1 } END { exit !found }' "$signal_log"; then
+      err 'FAIL: an unreachable CrowdSec LAPI emitted no crowdsec error record'
+      signal_fail=1
+    fi
+
+    # ALERT ARM for the startup prefix. Its RUNTIME arm is the `caddy run` grep at the
+    # top of this file, which cannot reach $signal_alerts from outside this subshell.
+    if ! grep -qF '^Error: ' "$signal_alerts"; then
+      err 'FAIL: the alerts/ bundle no longer selects the ^Error: startup prefix driven at the top of this file'
+      signal_fail=1
+    fi
+
+    # A rejected in-process load must move the gauge CaddyConfigReloadFailed reads. The
+    # cause is in the fixture, not in the environment: `caddy adapt` never resolves
+    # `{env.VAR}` (README.md:96), and :70-72 already proves an empty bouncer key fails
+    # provisioning. The `adapt` call is a GUARD and not the subject: it proves the
+    # fixture still loads locally, so a zero exit from `caddy reload` below can only
+    # mean the running server accepted it.
+    reload_cfg="$signal_dir/Caddyfile.reload-failure"
+    reload_err="$signal_dir/reload-failure.err"
+    reload_metrics="$signal_dir/reload-metrics"
+    sed 's/api_key smoke-not-a-real-key/api_key ""/' "$signal_cfg" >"$reload_cfg"
+    if ! grep -qF 'api_key ""' "$reload_cfg"; then
+      err 'FAIL: could not empty the bouncer key in the reload-failure fixture'
+      signal_fail=1
+    elif ! "$caddy" adapt --adapter caddyfile --config "$reload_cfg" \
+      >/dev/null 2>"$reload_err"; then
+      err 'FAIL: could not adapt the reload-failure fixture'
+      cat "$reload_err" >&2
+      signal_fail=1
+    elif "$caddy" reload --adapter caddyfile --config "$reload_cfg" \
+      >"$reload_err" 2>&1; then
+      err 'FAIL: the running Caddy accepted a config whose CrowdSec bouncer key is empty'
+      signal_fail=1
+    elif ! curl -fsS http://127.0.0.1:2019/metrics >"$reload_metrics"; then
+      err 'FAIL: metrics were unavailable after the rejected config load'
+      signal_fail=1
+    elif ! grep -qE '^caddy_config_last_reload_successful 0$' "$reload_metrics"; then
+      err 'FAIL: a rejected in-process config load did not move caddy_config_last_reload_successful to 0'
+      signal_fail=1
+    fi
 
     if ! grep -qF 'tls\\.(obtain|renew)' "$signal_alerts"; then
       err 'FAIL: the alerts/ bundle no longer selects both certmagic failure loggers'

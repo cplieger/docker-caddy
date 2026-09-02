@@ -1,27 +1,32 @@
 # Recommended alert rules for docker-caddy, the LogQL half. Loki ruler rule
 # group: ship the container's logs to Loki and evaluate these with Loki's
 # ruler; firing alerts deliver through your Alertmanager exactly like
-# Prometheus metric alerts. The sibling alerts/promql.yaml carries the four
-# rules a Prometheus or Mimir ruler evaluates. Load each file into its own
-# ruler: neither ruler parses the other's expressions.
+# Prometheus metric alerts. One caveat before you choose that store's retention
+# and who can read it: a startup failure caused by a rejected credential is
+# reported by the module that rejected it, and the bundled Cloudflare DNS plugin
+# prints the token it refused inside its error text, so the `^Error: ` line
+# CaddyStartupFailed selects can carry a live Cloudflare API token. Treat any
+# token that appears in one as exposed and rotate it. The sibling
+# alerts/promql.yaml carries the rules a Prometheus or Mimir ruler evaluates.
+# Load each file into its own ruler: neither ruler parses the other's expressions.
 #
-# Three of the five LogQL rules (CaddyCertIssuanceFailed,
+# The LogQL rules whose condition registers no series at all
+# (CaddyCertIssuanceFailed, CaddyCertJobFailed,
 # CaddyCrowdSecLAPIPollFailed, CaddyConfigWatcherStopped) read the container's
-# log stream, because their condition has no series to read: Caddy registers no
-# certificate, ACME or expiry series at all, the bouncer's counters need the
-# option above while its log line needs nothing, and a stopped config watcher
-# never moves the reload gauge. Ship the container's logs to Loki and evaluate
-# all five with Loki's ruler; firing alerts deliver through your
-# Alertmanager exactly like the metric ones. Their shared prerequisites are the
-# log ENCODING and the log DESTINATION. Caddy writes JSON whenever stderr is
-# not an interactive terminal, which is the container default, so `| json`
-# parses its LOG records - with one exception the rules must account for: a
-# startup failure is reported by the CLI itself, before that logger exists, as
-# a plain-text `Error: ...` line, which is what CaddyStartupFailed selects
-# without a parser stage. Zap's production encoder writes the level lowercase,
-# so `level="error"` and never `level="ERROR"`. A global `log` block that sends
-# the default logger to a file takes these lines off stderr, and then none of the
-# three matches anything, whatever is failing: leave the default logger on
+# log stream instead: Caddy registers no
+# certificate, ACME or expiry series at all, the bouncer's counters need
+# `enable_caddy_metrics` in the `crowdsec` global block while its log line needs
+# nothing, and a stopped config watcher never moves the reload gauge. Their
+# shared prerequisites are the log ENCODING and the log DESTINATION. Caddy
+# writes JSON whenever stderr is not an interactive terminal, which is the
+# container default, so `| json` parses its LOG records - with one exception
+# the rules must account for: a startup failure is reported by the CLI itself,
+# before that logger exists, as a plain-text `Error: ...` line, which is what
+# CaddyStartupFailed selects without a parser stage. Zap's production encoder
+# writes the level lowercase, so `level="error"` and never `level="ERROR"`. A
+# global `log` block that sends the default logger to a file takes these lines
+# off stderr, and then nothing in this file matches except
+# `CaddyStartupFailed`, whatever is failing: leave the default logger on
 # stderr, or tail that file with your collector. CaddyReloadRejected needs the
 # log destination but not the encoding because it selects the raw message.
 # CaddyStartupFailed is the one LogQL rule that needs neither prerequisite: the
@@ -31,7 +36,9 @@
 # Detection from OUTSIDE the container is still worth keeping for certificates,
 # and it is not redundant with CaddyCertIssuanceFailed: a TLS prober against
 # the served site (blackbox_exporter's probe_ssl_earliest_cert_expiry) catches
-# the one case that logs nothing, a renewal that is never attempted.
+# the case that logs nothing: a certificate certmagic does not manage, such as
+# one loaded from files with `tls <cert> <key>`, which is never renewed and
+# never reported.
 #
 # Thresholds, `for:` windows, and the severity labels are starting points;
 # adjust them to your deployment. The `container` selector is whatever your
@@ -66,9 +73,44 @@ groups:
             its own line per attempt. Check the DNS-01 credential, the zone,
             and the issuer's own status. On a renewal the serving certificate
             stays valid until it expires, so this fires while the site still
-            works. A renewal that is never ATTEMPTED logs nothing and this rule
-            cannot see it; an external TLS prober (blackbox_exporter's
-            probe_ssl_earliest_cert_expiry) is what covers that case.
+            works. A certificate certmagic does not MANAGE is never renewed
+            and logs nothing, so no log rule can see it; an external TLS
+            prober (blackbox_exporter's probe_ssl_earliest_cert_expiry) is what
+            covers that case. A managed job that fails before the issuer is
+            contacted does log, on the base `tls` logger rather than these two,
+            which is what CaddyCertJobFailed selects.
+      - alert: CaddyCertJobFailed
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} |= "job failed" != "context canceled" | json
+            | logger="tls" | level="error" [1h]
+          )) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A Caddy certificate job ended in an error"
+          description: >
+            A certificate-management job ended in an error, which
+            CaddyCertIssuanceFailed cannot see. certmagic reports this on the
+            base `tls` logger once per failed job, rather than under
+            `tls.obtain` or `tls.renew`, so one event triggers this rule. Three
+            causes reach it, all outside the retry loop. A storage readiness
+            check can fail before certmagic contacts the issuer if `/data` is
+            unwritable, unreadable, or full. This stops both issuance and
+            renewal, so check that volume first. A certificate lock can also
+            fail, or certmagic can mark an error as not worth retrying, such as
+            when it renews a certificate but cannot load it into memory. Retry
+            exhaustion does not reach this rule: certmagic logs `final attempt;
+            giving up` and returns no error, so CaddyCertIssuanceFailed reports
+            that arm. A successful config load cancels the outgoing config's
+            context. Without the `context canceled` exclusion, an ordinary
+            reload during a certificate retry would trigger this rule at `> 0`
+            and `for: 0m`; an opted-in `--watch` can reload after its 1-second
+            poll. The excluded context belongs to a config that is already
+            gone, and the storage failure cannot be a cancellation. The line
+            is logged once per job, so this alert reports the transition and
+            clears when the window passes.
       - alert: CaddyCrowdSecLAPIPollFailed
         expr: |
           sum by (container) (count_over_time(
