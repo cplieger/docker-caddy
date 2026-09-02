@@ -1,5 +1,5 @@
 # check=error=true
-FROM caddy:2.11-builder@sha256:4bdeabce8e79d36b23d1cba7d20598cec2c1117ace960d8ca06071f945e8fc9b AS base
+FROM caddy:2.11-builder@sha256:5f5958fecaf8a897ca5ba5951ab96adddda3128db3c45640839d19b41cb09bdc AS base
 ENV GOTOOLCHAIN=auto
 
 FROM base AS builder
