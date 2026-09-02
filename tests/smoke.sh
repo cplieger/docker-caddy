@@ -317,10 +317,11 @@ EOF
   else
     curl -sS http://127.0.0.1:8082/ >/dev/null 2>&1 || true
     signal_i=0
-    while [ "$signal_i" -lt 10 ]; do
+    while [ "$signal_i" -lt 15 ]; do
       if curl -fsS http://127.0.0.1:2019/metrics >"$signal_metrics" 2>/dev/null \
         && grep -qF 'crowdsec_bouncer_lapi_requests_total' "$signal_metrics" \
-        && grep -qF '"logger":"crowdsec"' "$signal_log"; then
+        && grep -qF '"logger":"crowdsec"' "$signal_log" \
+        && grep -qE '^caddy_reverse_proxy_upstreams_healthy\{.*upstream="127\.0\.0\.1:9".*\} 0$' "$signal_metrics"; then
         break
       fi
       signal_i=$((signal_i + 1))
