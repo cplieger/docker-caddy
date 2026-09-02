@@ -16,10 +16,11 @@ FROM builder AS test
 COPY tests/ /tmp/tests/
 COPY Caddyfile.example /tmp/tests/Caddyfile.example
 COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
-COPY alerts.yaml /tmp/tests/alerts.yaml
+COPY alerts/ /tmp/tests/alerts/
+COPY compose.yaml /tmp/tests/compose.yaml
 RUN sh /tmp/tests/smoke.sh && touch /tests-passed
 
-# Asserts the freshly built probe runs on this arch and exits 1 for an unreachable URL: non-zero is what the HEALTHCHECK below rests on, and 1 rather than the 2 Docker's contract reserves. HEALTH_PROBE_VERSION is Renovate-bumped.
+# Asserts the freshly built probe runs on this arch and exits 1 for an unreachable URL: non-zero is what the HEALTHCHECK below rests on, and 1 rather than the 2 Docker's contract reserves.
 FROM base AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health/probe
 ARG HEALTH_PROBE_VERSION=v1.0.4
@@ -36,9 +37,10 @@ COPY --from=builder /usr/bin/caddy /custom-caddy
 RUN set -eu; \
     custom=$(/custom-caddy version); custom=${custom%% *}; \
     donor=$(caddy version); donor=${donor%% *}; \
-    [ "$custom" = "$donor" ] || { printf '%s\n' "custom binary is $custom but the runtime donor is $donor" >&2; exit 1; }; \
+    [ "$custom" = "$donor" ] || { printf '%s\n' "custom binary is $custom but the runtime donor is $donor" "bump the lagging pin: the caddy:2.11-builder and caddy:2.11 pins are independent digests Renovate moves in separate PRs" >&2; exit 1; }; \
     [ "$(pwd)" = "$CADDY_WORKDIR" ] || { printf '%s\n' "donor WORKDIR is $(pwd); this Dockerfile declares $CADDY_WORKDIR" >&2; exit 1; }; \
-    touch /donor-contract-ok
+    [ "${XDG_DATA_HOME:-}" = /data ] || { printf '%s\n' "donor XDG_DATA_HOME is ${XDG_DATA_HOME:-<unset>}; this Dockerfile clones /data" >&2; exit 1; }; \
+    [ "${XDG_CONFIG_HOME:-}" = /config ] || { printf '%s\n' "donor XDG_CONFIG_HOME is ${XDG_CONFIG_HOME:-<unset>}; this Dockerfile clones /config" >&2; exit 1; }
 
 FROM gcr.io/distroless/static-debian12:latest@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 
@@ -47,15 +49,15 @@ COPY --from=donor /usr/share/caddy /usr/share/caddy
 COPY --from=donor /etc/mime.types /etc/mime.types
 COPY --from=donor /config /config
 COPY --from=donor /data /data
-# Hand-cloned, not COPYed from the donor: XDG_DATA_HOME is what makes /data the cert store — re-check on a major Caddy bump.
+# Hand-cloned, not COPYed from the donor: XDG_DATA_HOME is what makes /data the cert store; donor-contract asserts both against the donor.
 ENV XDG_CONFIG_HOME=/config
 ENV XDG_DATA_HOME=/data
 
-COPY --chmod=755 --from=builder /usr/bin/caddy /usr/bin/caddy
+# From donor-contract, not builder: this COPY is the edge that forces the parity stage to run.
+COPY --chmod=755 --from=donor-contract /custom-caddy /usr/bin/caddy
 COPY --chmod=755 --from=probe-builder /out/probe /probe
 # Force the test stage to build and pass before the runtime image is produced.
 COPY --from=test /tests-passed /tests-passed
-COPY --from=donor-contract /donor-contract-ok /donor-contract-ok
 
 EXPOSE 80 443 443/udp 2019
 ARG CADDY_WORKDIR

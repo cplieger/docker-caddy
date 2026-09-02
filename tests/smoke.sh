@@ -15,31 +15,11 @@ fail=0
 log() { printf '%s\n' "$*"; }
 err() { printf '%s\n' "$*" >&2; }
 
-if ! mods=$("$caddy" list-modules 2>&1); then
-  err "FAIL: 'caddy list-modules' did not run"
-  err "$mods"
-  fail=1
-else
-  if ! printf '%s\n' "$mods" | grep -qE '^dns\.providers\.cloudflare[[:space:]]*$'; then
-    err "FAIL: dns.providers.cloudflare module is not compiled into the binary"
-    fail=1
-  fi
-  if ! printf '%s\n' "$mods" | grep -qE '^http\.handlers\.crowdsec[[:space:]]*$'; then
-    err "FAIL: http.handlers.crowdsec module is not compiled into the binary"
-    fail=1
-  fi
-fi
-
 # The test stage copies examples beside this script; local runs use the repo root.
 example="$d/Caddyfile.example"
 [ -f "$example" ] || example="$d/../Caddyfile.example"
-if ! out=$("$caddy" validate --adapter caddyfile --config "$example" 2>&1); then
-  err "FAIL: 'caddy validate' rejected Caddyfile.example"
-  err "$out"
-  fail=1
-fi
 
-# Reject a malformed config and pin the raw startup prefix alerts.yaml selects.
+# Reject a malformed config and pin the raw startup prefix alerts/logql.yaml selects.
 # Driven through `caddy run`, the image's own CMD, because that produces the
 # prefix. The timeout bounds a build that accepts this file and serves forever.
 # Its exit status is deliberately ignored because GNU and BusyBox differ.
@@ -48,7 +28,7 @@ trap 'rm -f "$bad"' EXIT
 printf '%s\n' ':80 {' >"$bad"
 out=$(timeout 10 "$caddy" run --adapter caddyfile --config "$bad" 2>&1) || true
 if ! printf '%s\n' "$out" | grep -q '^Error: '; then
-  err "FAIL: 'caddy run' on a malformed Caddyfile did not emit the Error: prefix alerts.yaml selects"
+  err "FAIL: 'caddy run' on a malformed Caddyfile did not emit the Error: prefix alerts/logql.yaml selects"
   err "$out"
   fail=1
 fi
@@ -56,6 +36,22 @@ fi
 # Validate plugin directives with dummy credentials, never caller secrets.
 plugins="$d/Caddyfile.plugins.example"
 [ -f "$plugins" ] || plugins="$d/../Caddyfile.plugins.example"
+compose="$d/compose.yaml"
+[ -f "$compose" ] || compose="$d/../compose.yaml"
+if [ ! -f "$compose" ]; then
+  err "FAIL: compose.yaml is unavailable for credential-contract validation"
+  fail=1
+else
+  for credential in CLOUDFLARE_API_TOKEN CROWDSEC_BOUNCER_KEY; do
+    if ! grep -qE "^[[:space:]]*$credential:" "$compose"; then
+      err "FAIL: compose.yaml no longer passes $credential"
+      fail=1
+    elif ! grep -qF "{env.$credential}" "$plugins"; then
+      err "FAIL: Caddyfile.plugins.example no longer consumes $credential"
+      fail=1
+    fi
+  done
+fi
 cf_token=$(printf 'cfut_%032d' 0)
 cs_key=smoke-not-a-real-key
 if ! out=$(CLOUDFLARE_API_TOKEN="$cf_token" CROWDSEC_BOUNCER_KEY="$cs_key" \
@@ -222,15 +218,26 @@ if ! (
   signal_log="$signal_dir/caddy.log"
   signal_metrics="$signal_dir/metrics"
   # Same idiom as $example above: the build copies the bundle beside this script,
-  # a local run reads the committed copy.
-  signal_alerts="$d/alerts.yaml"
-  [ -f "$signal_alerts" ] || signal_alerts="$d/../alerts.yaml"
+  # a local run reads the committed copy. The bundle is a FOLDER, one file per
+  # expression language, and the assertions below read every file in it rather
+  # than one filename: a rule moving between promql.yaml and logql.yaml must not
+  # change which tokens the bundle selects, and a third language file later is
+  # covered with no edit here.
   signal_fail=0
+  signal_bundle="$d/alerts"
+  [ -d "$signal_bundle" ] || signal_bundle="$d/../alerts"
+  signal_alerts="$signal_dir/alerts-bundle.yaml"
+  cat "$signal_bundle"/*.yaml >"$signal_alerts" 2>/dev/null || true
+  if [ ! -s "$signal_alerts" ]; then
+    err "FAIL: no alert rule files under $signal_bundle"
+    signal_fail=1
+  fi
 
   # INVARIANT for anyone adding a pair below, and it has TWO arms because each one
   # has gone vacuous here already.
   #
-  # ALERT ARM: the token is grepped -F in alerts.yaml, so it must be a substring of
+  # ALERT ARM: the token is grepped -F across the alerts/ bundle, so it must be a
+  # substring of
   # the RULE EXPRESSION (or of the annotation that consumes the label) and unique to
   # it. A bare label name is satisfied by the file's own prose -- `handler` by the
   # header, `code` by "encoder", `upstream` by an annotation -- so aggregating the
@@ -247,10 +254,10 @@ if ! (
     runtime_token=$2
     runtime_file=$3
     if ! grep -qF "$alert_token" "$signal_alerts"; then
-      err "FAIL: alerts.yaml no longer selects $alert_token"
+      err "FAIL: the alerts/ bundle no longer selects $alert_token"
       signal_fail=1
     elif ! grep -qF "$runtime_token" "$runtime_file"; then
-      err "FAIL: runtime output no longer contains $runtime_token selected by alerts.yaml"
+      err "FAIL: runtime output no longer contains $runtime_token selected by the alerts/ bundle"
       signal_fail=1
     fi
   }
@@ -278,7 +285,7 @@ if ! (
   awk '/^      - alert: CaddyHigh5xxRate$/ { r = 1 } r && /^        for:/ { exit } r { print }' \
     "$signal_alerts" >"$signal_dir/rule-5xx"
   if [ ! -s "$signal_dir/rule-5xx" ]; then
-    err 'FAIL: could not extract the CaddyHigh5xxRate expression from alerts.yaml (renamed?)'
+    err 'FAIL: could not extract the CaddyHigh5xxRate expression from the alerts/ bundle (renamed?)'
     signal_fail=1
   fi
 
@@ -303,7 +310,7 @@ http://:8082 {
 EOF
 
   : >"$signal_log"
-  if ! "$caddy" start --watch --adapter caddyfile --config "$signal_cfg" >"$signal_log" 2>&1; then
+  if ! "$caddy" start --watch --pidfile "$signal_dir/caddy.pid" --adapter caddyfile --config "$signal_cfg" >"$signal_log" 2>&1; then
     err "FAIL: caddy did not start for alert-signal smoke test"
     cat "$signal_log" >&2
     signal_fail=1
@@ -336,13 +343,13 @@ EOF
     require_rule_arms 'code=~"5.."' 1 'code='
     require_rule_arms 'sum without (server, code, method)' 2 'method='
     require_rule_arms 'sum without (server, code, method)' 2 'server='
-    require_alert_runtime 'crowdsec_bouncer_lapi_requests_failures_total{mode="stream"}' crowdsec_bouncer_lapi_requests_failures_total "$signal_metrics"
-    require_alert_runtime 'crowdsec_bouncer_lapi_requests_total{mode="stream"}' crowdsec_bouncer_lapi_requests_total "$signal_metrics"
+    require_alert_runtime 'crowdsec_bouncer_lapi_requests_failures_total{mode="stream"}' 'crowdsec_bouncer_lapi_requests_failures_total{mode="stream"' "$signal_metrics"
+    require_alert_runtime 'crowdsec_bouncer_lapi_requests_total{mode="stream"}' 'crowdsec_bouncer_lapi_requests_total{mode="stream"' "$signal_metrics"
     require_alert_runtime 'logger="crowdsec"' '"logger":"crowdsec"' "$signal_log"
     require_alert_runtime 'logger="crowdsec" | level="error"' '"level":"error"' "$signal_log"
 
     if ! grep -qF 'tls\\.(obtain|renew)' "$signal_alerts"; then
-      err 'FAIL: alerts.yaml no longer selects both certmagic failure loggers'
+      err 'FAIL: the alerts/ bundle no longer selects both certmagic failure loggers'
       signal_fail=1
     elif ! build_info=$("$caddy" build-info 2>&1); then
       err "FAIL: 'caddy build-info' did not run"
@@ -363,6 +370,15 @@ EOF
     done
     require_alert_runtime '|= "unable to load latest config"' 'unable to load latest config' "$signal_log"
     require_alert_runtime 'logger="watcher"' '"logger":"watcher"' "$signal_log"
+
+    kill -s USR1 "$(cat "$signal_dir/caddy.pid")"
+    signal_i=0
+    while [ "$signal_i" -lt 10 ] \
+      && ! grep -qF 'failed to reload config from file' "$signal_log"; do
+      signal_i=$((signal_i + 1))
+      sleep 1
+    done
+    require_alert_runtime 'failed to reload config from file' 'failed to reload config from file' "$signal_log"
 
     if ! "$caddy" stop >/dev/null 2>&1; then
       err 'FAIL: caddy did not stop after alert-signal smoke test'

@@ -1,0 +1,150 @@
+# Recommended alert rules for docker-caddy, the PromQL half. Prometheus /
+# Mimir ruler rule group: scrape Caddy's metric registry and evaluate these
+# with Prometheus or the Mimir ruler; firing alerts deliver through your
+# Alertmanager. The sibling alerts/logql.yaml carries the five rules a Loki
+# ruler evaluates, because five of this app's nine conditions have no series
+# to read and only a log line. Load each file into its own ruler: neither
+# ruler parses the other's expressions.
+#
+# The four PromQL rules read one metric registry. The loopback admin endpoint
+# at http://localhost:2019/metrics and a dedicated `metrics` listener serve the
+# same registry, so scrape either by sharing Caddy's network namespace or by
+# scraping the `:2020` listener that Caddyfile.plugins.example ships. The
+# minimal Caddyfile.example carries neither the `metrics` option nor that
+# listener, so only CaddyConfigReloadFailed has input there. Beyond that
+# baseline, three of the four have a prerequisite of their own, stated below
+# with whether the shipped Caddyfile.plugins.example already satisfies it: it
+# satisfies two of the three, and the one it does not is health checks on the
+# `reverse_proxy`.
+# CaddyConfigReloadFailed needs no Caddyfile option at all: its metric is
+# registered unconditionally.
+# CaddyUpstreamUnhealthy registers its metric unconditionally too, but requires
+# active or passive health checks configured on the `reverse_proxy`
+# (`fail_duration <duration>` is enough for passive, with the argument: the bare
+# option name yields a Caddyfile that fails to adapt, and Caddy performs no
+# health checks by default), without which its series stays at 1 and the rule
+# cannot fire. This is the one prerequisite the shipped example does NOT
+# satisfy, and the example says so at its `reverse_proxy` line.
+# CaddyHigh5xxRate is the one rule that needs the `metrics` global option,
+# because that option is what registers the HTTP per-route instrumentation it
+# reads; the shipped example sets it, and the comment at that line states the
+# throughput cost of keeping it. The ratio is per handler, and how many
+# handler values a deployment has depends on its site ADDRESSES, not on how
+# many site blocks it writes. A block whose address carries a host or a
+# path adapts to one TERMINAL route wrapping a `subroute` handler, so every
+# request it serves is observed once, under the single value
+# handler="subroute". A block whose address carries neither, and is the only
+# block on its listener, is flattened to one non-terminal route per
+# directive, so a request is observed once per matched route and the
+# `handler` label is what keeps the number a request share.
+# The `metrics { per_host }` option adds the `host` label, which the expression
+# preserves automatically and which turns the rule per-vhost, at the
+# cardinality and memory cost Caddy's own documentation for the option names.
+# CaddyCrowdSecLAPIFailing reads the bouncer's LAPI counters, and the bouncer
+# registers no series at all unless `enable_caddy_metrics` is set in the
+# `crowdsec` global block, which the shipped example sets. It also needs the
+# STREAMING bouncer: with `disable_streaming` the bouncer makes no
+# decision-stream poll at all, so this rule's two mode="stream" selectors have
+# no series and CaddyCrowdSecLAPIPollFailed is the detector that survives. The
+# shipped example satisfies both. With it set, the admin endpoint and the
+# dedicated `metrics` listener serve the same registry, so the bouncer's
+# counters appear on whichever of the two is scraped. No
+# surface in this bundle reports the fail-open VERDICT: what the bundle detects
+# is the LAPI outage that causes it, and the admin API's POST /crowdsec/health
+# is a LAPI REACHABILITY check rather than a verdict read, since it pings the
+# LAPI through the live bouncer and inspects no decision.
+#
+# Thresholds, `for:` windows, and the severity labels are starting points;
+# adjust them to your deployment. The scrape `job` label is yours to set, so
+# it is intentionally left out of the metric selectors.
+groups:
+  - name: caddy
+    rules:
+      - alert: CaddyUpstreamUnhealthy
+        expr: caddy_reverse_proxy_upstreams_healthy == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Caddy upstream {{ $labels.upstream }} unhealthy"
+          description: >
+            Caddy reports {{ $labels.upstream }} as down for >5m; the fronted
+            service is likely failing. Cross-check the backend container.
+      - alert: CaddyConfigReloadFailed
+        expr: caddy_config_last_reload_successful == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Caddy config reload failed"
+          description: >
+            caddy_config_last_reload_successful=0; a config reload was attempted
+            and rejected, so the running config is the previous one. Validate
+            the Caddyfile (caddy validate) and check for a bad config reload.
+            Note this gauge moves only when Caddy attempts to apply a config
+            in-process. A config that fails to READ or ADAPT never reaches that
+            attempt and leaves this gauge at 1. For an opted-in `--watch` that
+            case is CaddyConfigWatcherStopped. At STARTUP that case is
+            CaddyStartupFailed, and it is the arm a deployment on the image's
+            own CMD hits first: the process exits before this gauge has a
+            series at all. For an explicit reload that case is
+            CaddyReloadRejected, which selects the ERROR line the signal
+            handler writes on the DEFAULT logger; `caddy reload` reports the
+            parse error as an exit status rather than into the container's log
+            stream. The running config stays stale either way.
+      - alert: CaddyHigh5xxRate
+        expr: >
+          sum without (server, code, method) (rate(caddy_http_request_duration_seconds_count{code=~"5.."}[5m]))
+          / sum without (server, code, method) (rate(caddy_http_request_duration_seconds_count[5m])) > 0.05
+          and ignoring(handler, host)
+          sum without (server, handler, code, method, host) (rate(caddy_http_request_duration_seconds_count[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Caddy 5xx rate >5% on handler {{ $labels.handler }}"
+          description: >
+            The 5xx share of the requests that reached the
+            {{ $labels.handler }} handler has stayed above 5% for 10 minutes,
+            while the target as a whole carried more than 1 observation per
+            second over the same 5-minute window. That throughput floor is
+            deliberately aggregate, not per handler: a handler's bad share
+            pages once the target carries traffic, even when that handler is
+            quiet. The histogram counts one observation per matched top-level
+            route, not one per request, so keeping the `handler` label is what
+            makes this a request share: a request observes once per matched
+            route OF that handler, which is once under the usual
+            one-directive-per-handler layout, while aggregating the label away
+            weights every request by how many routes it traversed. Two routes
+            sharing a handler name (two `header` directives with overlapping
+            matchers) make this an observation share again for that handler.
+            Indicates upstream failures or a broken route; correlate with
+            CaddyUpstreamUnhealthy and the backend logs.
+      - alert: CaddyCrowdSecLAPIFailing
+        expr: >
+          rate(crowdsec_bouncer_lapi_requests_failures_total{mode="stream"}[10m])
+          / rate(crowdsec_bouncer_lapi_requests_total{mode="stream"}[10m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CrowdSec bouncer cannot reach the LAPI"
+          description: >
+            More than half of the bouncer's decision-stream polls have been failing
+            for >5m, so it is learning nothing further from the LAPI. What
+            enforcement survives depends on the cache. With a warm cache, which is
+            every case except an outage starting before the first stream response,
+            the decisions already cached keep being enforced for as long as the
+            outage lasts, while no new decision is learned and no expiry is
+            applied, so the enforced list silently ages. With a cold cache, an
+            outage that begins before that first response, nothing is enforced.
+            With `enable_hard_fails` set the bouncer logs at FATAL and exits
+            instead, so the container restart is the signal there, not this rule.
+            The proxy keeps serving and the healthcheck stays green
+            throughout, so this rule is the shipped bundle's signal for the outage;
+            the admin API's POST /crowdsec/health is an alternative reachability
+            check. Needs `enable_caddy_metrics` in the `crowdsec` global block
+            AND the default streaming bouncer, both of which the shipped example
+            has; `disable_streaming` stops the decision-stream poll, so these
+            selectors have no series. Check the CrowdSec LAPI and the
+            bouncer's `api_url` and `api_key`.

@@ -4,5 +4,6 @@
 *
 !Caddyfile.example
 !Caddyfile.plugins.example
-!alerts.yaml
+!alerts/
+!compose.yaml
 !tests/
