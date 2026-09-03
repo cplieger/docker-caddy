@@ -1,0 +1,263 @@
+# Recommended alert rules for docker-caddy, the LogQL half. Loki ruler rule
+# group: ship the container's logs to Loki and evaluate these with Loki's
+# ruler; firing alerts deliver through your Alertmanager exactly like
+# Prometheus metric alerts. One caveat before you choose that store's retention
+# and who can read it: a startup failure caused by a rejected credential is
+# reported by the module that rejected it, and the bundled Cloudflare DNS plugin
+# prints the token it refused inside its error text, so the `^Error: ` line
+# CaddyStartupFailed selects can carry a live Cloudflare API token. Treat any
+# token that appears in one as exposed and rotate it. The sibling
+# alerts/promql.yaml carries the rules a Prometheus or Mimir ruler evaluates.
+# Load each file into its own ruler: neither ruler parses the other's expressions.
+#
+# The LogQL rules whose condition registers no series at all
+# (CaddyCertIssuanceFailed, CaddyCertJobFailed,
+# CaddyCrowdSecLAPIPollFailed, CaddyConfigWatcherStopped) read the container's
+# log stream instead: Caddy registers no
+# certificate, ACME or expiry series at all, the bouncer's counters need
+# `enable_caddy_metrics` in the `crowdsec` global block while its log line needs
+# nothing, and a stopped config watcher never moves the reload gauge. Their
+# shared prerequisites are the log ENCODING and the log DESTINATION. Caddy
+# writes JSON whenever stderr is not an interactive terminal, which is the
+# container default, so `| json` parses its LOG records - with one exception
+# the rules must account for: a startup failure is reported by the CLI itself,
+# before that logger exists, as a plain-text `Error: ...` line, which is what
+# CaddyStartupFailed selects without a parser stage. Zap's production encoder
+# writes the level lowercase, so `level="error"` and never `level="ERROR"`. A
+# global `log` block that sends the default logger to a file takes these lines
+# off stderr, and then nothing in this file matches except
+# `CaddyStartupFailed`, whatever is failing: leave the default logger on
+# stderr, or tail that file with your collector. CaddyReloadRejected needs the
+# log destination but not the encoding because it selects the raw message.
+# CaddyStartupFailed is the one LogQL rule that needs neither prerequisite: the
+# CLI prints its line on stderr before Caddy's logger exists, so no `log` block
+# can move it off stderr (the encoding half is stated above).
+#
+# Detection from OUTSIDE the container is still worth keeping for certificates,
+# and it is not redundant with CaddyCertIssuanceFailed: a TLS prober against
+# the served site (blackbox_exporter's probe_ssl_earliest_cert_expiry) catches
+# the case that logs nothing: a certificate certmagic does not manage, such as
+# one loaded from files with `tls <cert> <key>`, which is never renewed and
+# never reported.
+#
+# Thresholds, `for:` windows, and the severity labels are starting points;
+# adjust them to your deployment. The `container` selector is whatever your
+# log collector sets (Grafana Alloy's Docker log discovery sets `container`
+# with no configuration; Promtail and others may key on `job` or `service`
+# instead).
+groups:
+  - name: caddy
+    rules:
+      - alert: CaddyCertIssuanceFailed
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} | json
+            | logger=~"tls\\.(obtain|renew)" | level="error" [1h]
+          )) > 2
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Caddy could not get a certificate"
+          description: >
+            Caddy logged more than 2 certificate errors in an hour, so an
+            issuance or a renewal is failing. The `tls.renew` logger carries a
+            renewal and `tls.obtain` a first issuance; the lines are `could not
+            get certificate from issuer` once per issuer per attempt, then
+            either `will retry` or `final attempt; giving up`. One failed
+            attempt with one issuer logs 2 lines, which is what the threshold
+            of 2 excludes, so the rule needs a second attempt; Caddy retries on
+            an escalating backoff for up to 30 days and the second attempt
+            comes one minute after the first. Raise the threshold, or lengthen
+            the window, if you configure several issuers, because each one logs
+            its own line per attempt. Check the DNS-01 credential, the zone,
+            and the issuer's own status. On a renewal the serving certificate
+            stays valid until it expires, so this fires while the site still
+            works. A certificate certmagic does not MANAGE is never renewed
+            and logs nothing, so no log rule can see it; an external TLS
+            prober (blackbox_exporter's probe_ssl_earliest_cert_expiry) is what
+            covers that case. A managed job that fails before the issuer is
+            contacted does log, on the base `tls` logger rather than these two,
+            which is what CaddyCertJobFailed selects.
+      - alert: CaddyCertJobFailed
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} |= "job failed" != "context canceled" | json
+            | logger="tls" | level="error" [1h]
+          )) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A Caddy certificate job ended in an error"
+          description: >
+            A certificate-management job ended in an error, which
+            CaddyCertIssuanceFailed cannot see. certmagic reports this on the
+            base `tls` logger once per failed job, rather than under
+            `tls.obtain` or `tls.renew`, so one event triggers this rule. Most
+            causes reach it from outside the retry loop. A storage readiness
+            check can fail before certmagic contacts the issuer if `/data` is
+            unwritable, unreadable, or full. This stops both issuance and
+            renewal, so check that volume first. A certificate lock can also
+            fail, or certmagic can mark an error as not worth retrying, such as
+            when it renews a certificate but cannot load it into memory. It
+            marks an ISSUER error that way too: every attempt after the first is
+            made against the ACME issuer's TEST endpoint, Let's Encrypt staging
+            while the CA is left at its default, and one that succeeds there
+            while the production endpoint then refuses the same order ENDS the
+            retries, so read the `error` field before you check the volume. Retry
+            exhaustion does not reach this rule: certmagic logs `final attempt;
+            giving up` and returns no error, so CaddyCertIssuanceFailed reports
+            that arm. A successful config load cancels the outgoing config's
+            context. Without the `context canceled` exclusion, an ordinary
+            reload during a certificate retry would trigger this rule at `> 0`
+            and `for: 0m`; an opted-in `--watch` can reload after its 1-second
+            poll. The excluded context belongs to a config that is already
+            gone, and the storage failure cannot be a cancellation. The line
+            is logged once per job, so this alert reports the transition and
+            clears when the window passes.
+      - alert: CaddyCrowdSecLAPIPollFailed
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} | json
+            | logger="crowdsec" | level="error" [10m]
+          )) > 2
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CrowdSec bouncer is logging LAPI errors"
+          description: >
+            The bouncer logged more than 2 errors in 10 minutes. Under the
+            default streaming bouncer it logs one ERROR line per failed poll,
+            and the cadence depends on whether a stream was ever established;
+            under `disable_streaming` the line is per REQUEST instead, so the
+            cadence follows traffic rather than the ticker. An established
+            stream polls every 60s
+            by default, so a LAPI that starts failing reaches the threshold of
+            2 in about 2 to 3 minutes. A LAPI unreachable from startup is retried
+            on a 10s delay, so the third ERROR arrives about 20 seconds in when
+            the connect fails fast (a refused connection or a DNS failure
+            returns immediately, leaving only the two retry delays) and about
+            50 seconds in when the LAPI is blackholed, because each attempt also
+            spends its own 10s deadline before the delay starts. One lost poll
+            on an established stream stays quiet. The selector is the log LEVEL
+            under the `crowdsec` logger rather than a message, because the failed
+            poll logs the raw transport error and has no stable string; any other
+            repeating bouncer error trips the same rule, so read the line. This
+            rule needs no Caddyfile option at all, which is what makes it the
+            detector for a deployment that leaves `enable_caddy_metrics` off;
+            where it is set, CaddyCrowdSecLAPIFailing reports the same outage as
+            a rate. With `enable_hard_fails` set the bouncer logs at FATAL and
+            exits instead, so the container restart is the signal there, not
+            this rule. Consequences for enforcement are the ones
+            CaddyCrowdSecLAPIFailing describes. Check the CrowdSec LAPI and the
+            bouncer's `api_url` and `api_key`.
+      - alert: CaddyConfigWatcherStopped
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} |= "unable to load latest config"
+            | json | logger="watcher" [1h]
+          )) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Caddy stopped watching its config file"
+          description: >
+            Caddy logged `unable to load latest config` under the `watcher`
+            logger, so an opted-in `--watch` could not READ or ADAPT the
+            current config file and the poller stopped for the life of the
+            process. Read the structured `error` field for which arm it was:
+            `reading config from file:` is a missing or unreadable file,
+            `adapting config using caddyfile:` is a Caddyfile that does not
+            parse, and `config is not valid JSON:` is a JSON config watched
+            without `--adapter`. Different repairs, same dead watcher. A
+            REPLACED file is none of them and this rule cannot see it: with the
+            config DIRECTORY mounted, a rename is read cleanly on the next poll,
+            and with the single FILE bind-mounted the mount pins the inode, so
+            the poller keeps reading the old bytes and logs nothing at all.
+            Mount the directory, or save in place. The running config is the
+            last good one and keeps serving,
+            later valid edits are ignored, and no other surface reports it:
+            `caddy_config_last_reload_successful` stays 1 because no in-process
+            load was attempted, and the container stays healthy. Recovery is a
+            container restart once the file is readable and valid again; an
+            explicit reload applies the current file without reviving the
+            watcher. This selects the string, not the level: the watcher also
+            logs `applying latest config` at ERROR when a good file fails to
+            LOAD, and that arm keeps polling and moves the gauge, so
+            CaddyConfigReloadFailed is the signal for it. The line is logged
+            once, so this alert reports the transition and clears when the
+            window passes even though the condition does not; lengthen the
+            window if you want it to sit longer. Deployments that do not
+            override the image CMD never arm the watcher and never see this.
+
+      - alert: CaddyReloadRejected
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} |= "failed to reload config from file" [1h]
+          )) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Caddy rejected a config reload it was asked for"
+          description: >
+            A SIGUSR1 reload was refused, so the running config is the previous
+            one and the file on disk is not live. Read the structured `error`
+            field for which arm it was: `reading config from file:` is a missing
+            or unreadable file, `adapting config using caddyfile:` is a Caddyfile
+            that does not parse, and a `loading new config` cause is a config
+            that read and adapted and then failed to apply. The first two leave
+            `caddy_config_last_reload_successful` at 1, because no in-process
+            load is attempted, so this rule is the only signal for them; the
+            third moves that gauge too, so CaddyConfigReloadFailed fires
+            alongside this rule there. This is the reload path a deployment on
+            the image's own CMD has, and the one arm the other config rules do
+            not reach: CaddyConfigWatcherStopped needs an opted-in `--watch`,
+            and CaddyStartupFailed only sees a failure at process start. The
+            proxy keeps serving the last good config and the healthcheck stays
+            green throughout. The line carries no `logger` field, because Caddy
+            reports it on the DEFAULT logger, which is why this rule selects the
+            message rather than a logger; it still shares the log-DESTINATION
+            prerequisite of the other log rules, so a global `log` block that
+            sends the default logger to a file takes it off stderr too. The line
+            is logged once per signal, so this reports the transition and clears
+            when the window passes. Recovery is to fix the file and send the
+            signal again; `caddy validate --adapter caddyfile --config <file>`
+            reaches the first two causes before you send it. A `caddy reload`
+            through `docker exec` is not covered here and does not need to be:
+            it reports the same failure as its own exit status.
+
+      # No `| json` stage and no cause alternation, deliberately: cobra prints this
+      # line before Caddy's JSON logger owns stderr, so a parser stage takes it out
+      # of the stream, and all three startup causes reach stderr behind the same
+      # `Error: ` prefix. Exit statuses above 1 are silenced by Caddy's cobra
+      # wrapper, so this prefix has no other producer under the image's own CMD.
+      - alert: CaddyStartupFailed
+        expr: |
+          sum by (container) (count_over_time(
+            {container="caddy"} |~ `^Error: ` [15m]
+          )) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Caddy exited during startup"
+          description: >
+            Caddy exited before it served anything, so nothing is being served at
+            all and no metric series exists to report it: the process ends before
+            the admin endpoint or a `metrics` listener binds. The line is the CLI's
+            own plain-text `Error: <cause>` on stderr, outside Caddy's JSON logger,
+            which is why this rule selects the raw line while the other log rules
+            parse JSON. Read the cause. `adapting config using caddyfile:` is a
+            Caddyfile that does not parse. `reading config from file:` is a missing
+            or unreadable file, which with a single-file bind mount also means the
+            mount source does not exist. `loading initial config:` is a config that
+            read and adapted and then failed to apply, so the cause is a module
+            that would not provision (a rejected credential, for instance) or an
+            address already in use. `caddy validate --adapter caddyfile --config
+            <file>` reaches the first two and the provisioning half of the third,
+            never an address conflict. With `restart: unless-stopped` the container
+            loops and the line repeats on every attempt.

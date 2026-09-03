@@ -23,8 +23,8 @@ All of Caddy's [standard features](https://caddyserver.com/docs/) work as docume
 ### Why this design
 
 - **Built from the official builder.** The binary matches upstream Caddy exactly; plugins are compiled in with `xcaddy`, the upstream-prescribed mechanism.
-- **Distroless runtime.** The final stage is `gcr.io/distroless/static`: no shell, no package manager, no OS packages to patch or scan. `TZ` is honored (the base ships tzdata). There is no shell to `docker exec` into, and `docker exec` can only run the shipped binaries (`caddy`, `/probe`); debugging is otherwise via logs, metrics, and the admin API.
-- **Upstream contract preserved.** The default Caddyfile, welcome page, MIME map and state directories are copied from the upstream runtime image, so upstream changes to them keep flowing in with ordinary image updates. The `XDG_*` env that makes `/data` the certificate store is declared by hand, because `COPY` moves files and not image ENV metadata, so it is re-checked on a major Caddy bump.
+- **Distroless runtime.** The final stage is `gcr.io/distroless/static`: no shell, no package manager, no OS packages to patch or scan. There is no shell to `docker exec` into, and `docker exec` can only run the shipped binaries (`caddy`, `/probe`); debugging is otherwise via logs, metrics, and the admin API.
+- **Upstream contract preserved.** The default Caddyfile, welcome page, MIME map and state directories are copied from the upstream runtime image, so upstream changes to them keep flowing in with ordinary image updates. The `XDG_*` env that makes `/data` the certificate store is declared by hand, because `COPY` moves files and not image ENV metadata.
 - **Multi-arch, built natively.** amd64 and arm64 each compile on matching hardware, with no emulation.
 - **Config reload without a restart.** Send the running process SIGUSR1
   (`docker kill -s USR1 caddy`) and Caddy reloads from the `--config` file and
@@ -64,7 +64,6 @@ services:
     restart: unless-stopped
 
     environment:
-      TZ: "Europe/Paris"
       # Set these in a gitignored .env file; never commit live tokens.
       CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:-}"   # used by the DNS-01 plugin
       CROWDSEC_BOUNCER_KEY: "${CROWDSEC_BOUNCER_KEY:-}"   # used by the CrowdSec bouncer
@@ -75,11 +74,11 @@ services:
       - "443:443/udp"   # HTTP/3
 
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy:/etc/caddy:ro
       - ./data:/data
 ```
 
-The bundled [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) is a minimal Caddyfile that uses both plugins; copy it to `Caddyfile` and make three edits: the site address, the `reverse_proxy` target, and `crowdsec.api_url`, a CrowdSec LAPI address reachable from the Caddy container. The shipped `http://crowdsec:8080` assumes a `crowdsec` service alias on a shared Compose network, which the one-service compose example above does not create; the bouncer fails open on a LAPI it cannot reach, so a wrong value serves every request unblocked. It reads `CLOUDFLARE_API_TOKEN` for the DNS-01 challenge and `CROWDSEC_BOUNCER_KEY` for the bouncer, both of which the compose service above passes through. Set both before the first start. The compose example defaults them to empty (`${VAR:-}`) rather than refusing to start. Each plugin refuses to provision on an empty credential, so Caddy exits at startup and the restart policy retries it. The build's smoke test validates that file against the shipped binary, so the example cannot drift from what the image can load.
+The bundled [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) is a minimal Caddyfile that uses both plugins; copy it to `caddy/Caddyfile` (`mkdir -p caddy && cp Caddyfile.plugins.example caddy/Caddyfile`) and make three edits: the site address, the `reverse_proxy` target, and `crowdsec.api_url`, a CrowdSec LAPI address reachable from the Caddy container. The shipped `http://crowdsec:8080` assumes a `crowdsec` service alias on a shared Compose network, which the one-service compose example above does not create; the bouncer fails open on a LAPI it cannot reach, so a wrong value serves every request unblocked. It reads `CLOUDFLARE_API_TOKEN` for the DNS-01 challenge and `CROWDSEC_BOUNCER_KEY` for the bouncer, both of which the compose service above passes through. Set both before the first start. The compose example defaults them to empty (`${VAR:-}`) rather than refusing to start. Each plugin refuses to provision on an empty credential, so Caddy exits at startup and the restart policy retries it. The build's smoke test validates that file against the shipped binary, so the example cannot drift from what the image can load.
 
 Both shipped examples state `admin localhost:2019`, which makes Caddy's loopback-only admin bind explicit (it is also Caddy's documented default). The built-in healthcheck probes this address; stating it guards against a global options block accidentally rebinding it. The directive outranks the `CADDY_ADMIN` env var, which only supplies the default admin address Caddy uses when no `admin` directive configures one.
 
@@ -94,13 +93,13 @@ Caddy reads its full config from the Caddyfile; environment variables are only u
 | `CLOUDFLARE_API_TOKEN` | API token with `Zone:Zone:Read` + `Zone:DNS:Edit` for the zones you serve; read by the `caddy-dns/cloudflare` DNS-01 plugin via `{env.CLOUDFLARE_API_TOKEN}`. A token the plugin rejects on format is echoed verbatim into the container log, so treat any value that appears in a startup or reload error as exposed and rotate it. The plugin's format check is anchored, so any extra character around the token fails it: surrounding quotes or braces, but also a stray space or a trailing newline picked up from a file. The error prints the whole value, so a good token can leak because of what surrounds it rather than what it is. Pass the bare token, with nothing around it. The check also accepts Cloudflare's API token formats only, so a different KIND of Cloudflare credential is rejected for what it is and printed the same way: a new-format Global API Key (`cfk_...`) and an Origin CA key (`v1.0-...`) both fail it, and both grant far more than DNS-01 needs. Pass the API token the variable's name asks for, not either of those. | _(unset)_ |
 | `CROWDSEC_BOUNCER_KEY` | Bouncer API key (generate with `cscli bouncers add caddy`); read by the `caddy-crowdsec-bouncer` plugin via `{env.CROWDSEC_BOUNCER_KEY}`. | _(unset)_ |
 
-Reference either credential only as `{env.VAR}`, never as a literal in the Caddyfile. The plugins resolve the placeholder at provision time, so the config the admin API serves at `GET /config/` keeps the placeholder; a hardcoded value comes back verbatim to anything that can reach that endpoint.
+Reference either credential only as `{env.VAR}`, never as a literal in the Caddyfile. The plugins resolve the placeholder at provision time, so the config the admin API serves at `GET /config/` keeps the placeholder; a hardcoded value comes back verbatim to anything that can reach that endpoint. This image does not declare `CADDY_VERSION`, unlike the official `caddy` image: the builder and the contract donor carry independent digest pins, so a copied version string could name a release the shipped binary is not, and a Caddyfile that reads `{env.CADDY_VERSION}` gets an empty value here and keeps serving.
 
 ### Volumes
 
 | Mount | Description |
 | --- | --- |
-| `/etc/caddy/Caddyfile` | Your Caddyfile (read-only is fine; reload with `docker kill -s USR1 caddy`, or `docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`) |
+| `/etc/caddy` | The directory holding your `Caddyfile` (read-only is fine; mount the DIRECTORY, not the file: replacing a single-file bind mount with a new file leaves the container on the old inode and defeats every reload path; reload with `docker kill -s USR1 caddy`, or `docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`) |
 | `/data` | Caddy's data directory: issued certificates, ACME state, plugin storage. **Persist this** or you'll re-issue certs on every restart. |
 | `/config` | (optional) Caddy's auto-generated JSON config and persistent state |
 
@@ -112,8 +111,9 @@ Reference either credential only as `{env.VAR}`, never as a literal in the Caddy
 | `443` | TCP | HTTPS / HTTP/2 |
 | `443` | UDP | HTTP/3 (QUIC) |
 | `2019` | TCP | Caddy's admin API (unauthenticated): loopback-bound by default, so publishing it reaches a listener that answers only inside the container |
+| `2020` | TCP | Prometheus metrics, only if your Caddyfile opens the listener |
 
-The admin API port is declared for documentation and for in-namespace scrapers; publishing it is only useful if a Caddyfile deliberately rebinds `admin` off loopback, and at that point it is an unauthenticated control plane on a routable address.
+The admin API port is declared for documentation and for in-namespace scrapers; publishing it is only useful if a Caddyfile deliberately rebinds `admin` off loopback, and at that point it is an unauthenticated control plane on a routable address. The `2020` listener is a Caddyfile decision rather than an image one: nothing in the image opens it, the shipped [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) does (`:2020 { metrics /metrics }`) and `Caddyfile.example` does not, and it is not in the image's `EXPOSE`. The compose example publishes no host port for it, but a site address with no host binds every interface in the container, so any container on the same Docker network can read the series.
 
 ### Running unprivileged
 
@@ -128,29 +128,49 @@ Under Docker's defaults that is all: containers start with `net.ipv4.ip_unprivil
 
 ## Alerting
 
-The recommended rules live in [`alerts.yaml`](alerts.yaml), where each rule's own prerequisites are stated in the file's header. The bundle is mixed, because Caddy carries its operational state in two places:
+The recommended rules ship as one file per expression language: the PromQL rules in [`alerts/promql.yaml`](alerts/promql.yaml) and the LogQL rules in [`alerts/logql.yaml`](alerts/logql.yaml). Load each file into its own ruler. A ruler parses every expression in the file it loads, and neither ruler parses the other's language, so one combined file loads in neither. Each rule's own prerequisites are stated in its file's header. The split follows the CONDITION rather than the app, because Caddy carries its operational state in two places:
 
-- **Four rules read metrics**, served by the admin API's `/metrics` endpoint at `http://localhost:2019/metrics` (the example's `admin localhost:2019`), so keep the admin API enabled (it is on by default) and scrape it. That bind is loopback, so scrape from inside the container's network namespace (a monitoring sidecar) or expose a routable listener with Caddy's [`metrics`](https://caddyserver.com/docs/caddyfile/directives/metrics) handler directive. Caddy's own series need nothing further; the bouncer's LAPI counters need `enable_caddy_metrics` in the `crowdsec` global block, which the shipped `Caddyfile.plugins.example` sets. Evaluate these with Prometheus or the Mimir ruler.
-- **Two rules read the container log**, because their condition registers no series at all. Ship the container's logs to Loki and evaluate those with [Loki's ruler](https://grafana.com/docs/loki/latest/alert/). Caddy encodes its log as JSON whenever stderr is not an interactive terminal, which is the container default, so `| json` parses the stream and `logger` and `level` are the selectors. One prerequisite is easy to miss: a global `log` block that sends the default logger to a file takes these lines off stderr, and both rules then match nothing. Leave the default logger on stderr, or tail that file with your collector.
+- **The PromQL rules read metrics** (`alerts/promql.yaml`), served by the admin API's `/metrics` endpoint at `http://localhost:2019/metrics` (the example's `admin localhost:2019`), so keep the admin API enabled (it is on by default) and scrape it. That bind is loopback, so scrape from inside the container's network namespace (a monitoring sidecar) or scrape the routable listener the shipped `Caddyfile.plugins.example` already carries (`:2020`, in the Ports table above). `CaddyTargetDown` and `CaddyTargetAbsent` read Prometheus's own `up` series rather than Caddy's registry, so no Caddyfile option gives them input, but their `job="caddy"` matcher must name your scrape job. Of the rest, only `CaddyConfigReloadFailed` needs nothing further. `CaddyHigh5xxRate` needs the `metrics` global option, which is what registers the per-route HTTP instrumentation it reads and which the shipped `Caddyfile.plugins.example` sets. `CaddyUpstreamUnhealthy` needs active or passive health checks on your own `reverse_proxy`, which neither shipped example configures, and without them its series stays at 1 and the rule cannot fire. The bouncer's LAPI counters need `enable_caddy_metrics` in the `crowdsec` global block, which the shipped example does set. `Caddyfile.example` carries none of the three, so of the rules that read Caddy's own registry it gives `CaddyConfigReloadFailed` input and nothing else. Evaluate these with Prometheus or the Mimir ruler.
+- **The LogQL rules read the container log** (`alerts/logql.yaml`), because their condition registers no series at all. Ship the container's logs to Loki and evaluate those with [Loki's ruler](https://grafana.com/docs/loki/latest/alert/). Caddy encodes its log as JSON whenever stderr is not an interactive terminal, which is the container default, so `| json` parses the stream and `logger` and `level` are the selectors. Every rule here but `CaddyReloadRejected` and `CaddyStartupFailed` is that shape. `CaddyReloadRejected` selects a message rather than a logger because Caddy reports it on the default logger. `CaddyStartupFailed` is different again: the CLI prints its line before that logger exists, so it carries no `logger` field and no `log` block can take it off stderr. One prerequisite is easy to miss: a global `log` block that sends the default logger to a file takes these lines off stderr, and none of them then matches anything except `CaddyStartupFailed`. Leave the default logger on stderr, or tail that file with your collector.
 
 Firing alerts deliver through your Alertmanager either way. They cover:
 
 | Alert | Fires when | Severity |
 | --- | --- | --- |
+| `CaddyTargetDown` | no successful scrape of Caddy for 15m, so every metric rule here is blind | critical |
+| `CaddyTargetAbsent` | there is no `up{job="caddy"}` series at all, so Caddy is not a configured target | critical |
 | `CaddyUpstreamUnhealthy` | a `reverse_proxy` upstream's health check reports it down for >5m | warning |
 | `CaddyConfigReloadFailed` | the last config reload was rejected, so the running config is stale | critical |
-| `CaddyHigh5xxRate` | the 5xx share of the last 5 minutes of requests stays above 5% for 10 minutes, at more than 1 req/s over that same window | warning |
+| `CaddyHigh5xxRate` | the 5xx share of the requests through one handler stays above 5% for 10 minutes, while the target as a whole carries more than 1 req/s over that same window | warning |
 | `CaddyCrowdSecLAPIFailing` | more than half the bouncer's LAPI decision-stream polls have failed over a 10m window, sustained for 5m | warning |
 | `CaddyCertIssuanceFailed` | Caddy logs more than 2 certificate errors in an hour while getting or renewing one | warning |
+| `CaddyCertJobFailed` | a certificate job ends in an error, including a `/data` that cannot be read or written | warning |
 | `CaddyCrowdSecLAPIPollFailed` | the bouncer logs more than 2 LAPI errors in 10 minutes, needing no Caddyfile option | warning |
+| `CaddyConfigWatcherStopped` | an opted-in `--watch` could not read or adapt the config file, so the watcher stopped and later edits are ignored | critical |
+| `CaddyReloadRejected` | a requested config reload was refused, so the file on disk is not the running config | critical |
+| `CaddyStartupFailed` | Caddy exits during startup, before it serves anything | critical |
 
-Thresholds and the `severity` labels are starting points; add your scrape `job` label to the metric selectors if you scrape more than one instance, adjust the `container` selector on the two log rules to whatever your log collector sets, and route by whatever labels your Alertmanager uses.
+Thresholds and the `severity` labels are starting points; add your scrape `job` label to the selectors that read Caddy's own registry if you scrape more than one instance, and set it on the reachability pair, which requires it; adjust the `container` selector on the log rules to whatever your log collector sets, and route by whatever labels your Alertmanager uses.
 
-No metric covers certificate renewal, because Caddy registers no certificate, ACME or expiry series. The log does: certmagic reports a failure at ERROR under `tls.renew` for a renewal and `tls.obtain` for a first issuance, as `could not get certificate from issuer` once per issuer per attempt, then `will retry` or `final attempt; giving up`. `CaddyCertIssuanceFailed` matches those. Keep a TLS prober against the served site as well (blackbox_exporter's `probe_ssl_earliest_cert_expiry`), because it catches the one case that logs nothing: a renewal that is never attempted.
+No metric covers certificate renewal, because Caddy registers no certificate, ACME or expiry series. The log does: certmagic reports a failure at ERROR under `tls.renew` for a renewal and `tls.obtain` for a first issuance, as `could not get certificate from issuer` once per issuer per attempt, then `will retry` or `final attempt; giving up`. `CaddyCertIssuanceFailed` matches those. Keep a TLS prober against the served site as well (blackbox_exporter's `probe_ssl_earliest_cert_expiry`), because it catches the case that logs nothing: a certificate certmagic does not manage, such as one loaded from files with `tls <cert> <key>`, which is never renewed and never reported.
 
 ## Healthcheck
 
 The image ships a **liveness** healthcheck: the bundled `/probe` binary (from [`cplieger/health`](https://github.com/cplieger/health); the runtime has no shell or wget) GETs Caddy's admin API at `http://127.0.0.1:2019/config/`, which is enabled by default. This confirms Caddy is up and the admin plane is responsive (it catches faults like a hung reload that keep serving traffic while the admin API is dead). It does not confirm a config is loaded: `GET /config/` answers 200 with a body of `null` once the config has been stopped or deleted, and the probe reads the status only. Under this image's own command a config that fails to load exits the process, so reaching that state takes a command override or a `DELETE /config/`; `caddy_config_last_reload_successful`, which the shipped `CaddyConfigReloadFailed` rule keys on, is what covers it. The probe works out of the box for **any** Caddyfile; no route configuration required.
+
+Each probe is an admin-API request, and Caddy logs every admin-API request except `/metrics` at INFO on the `admin.api` logger: one ~200-byte record per interval, 2880 a day at the baked 30s interval, for the life of the container. With the minimal `Caddyfile.example`, which configures no per-site `log` and so has no access log, those records are the whole steady-state content of the stream the [Alerting](#alerting) section asks you to ship to Loki. No shipped rule selects them, so alerting is unaffected; the cost is volume and readability. To drop them without losing the admin plane's own errors, configure two logs in your global options block:
+
+```caddy
+log {
+	exclude admin.api
+}
+log adminerrors {
+	include admin.api
+	level ERROR
+}
+```
+
+Caddy admits a message into every log whose include/exclude list accepts it, and each log has its own minimum level, so the first block takes the INFO records off the default log while the second keeps the `admin.api` ERROR records a failing admin request emits. `output` defaults to stderr and `format` to JSON off a terminal, so neither block needs either. A lone `log { exclude admin.api }` is level-blind and drops the ERROR records too.
 
 > **Note:** the default probe hits Caddy's admin API. If your Caddyfile sets `admin off` or rebinds the admin endpoint, this probe fails even though Caddy is serving normally; switch to the end-to-end `/health` override below in that case.
 
@@ -159,6 +179,7 @@ For an **end-to-end** check that verifies the proxy is actually serving traffic 
 ```caddy
 http://:80 {
     respond /health 200
+    respond 404
 }
 ```
 
@@ -176,7 +197,10 @@ healthcheck:
   test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
 ```
 
-Exit codes: 0 healthy, 1 any probe failed (each failure is one stderr line naming the URL, visible in `docker inspect --format '{{json .State.Health}}'`), 2 usage error. Override the timing in your compose for tighter detection windows regardless of which probe you use.
+The probe exits zero only when every URL answers 2xx, and non-zero otherwise, which is all
+Docker's health state distinguishes; a failure is written to stderr and surfaces in `docker
+inspect --format '{{json .State.Health}}'`. The exit-code table and the stderr diagnostics are
+[`cplieger/health`](https://github.com/cplieger/health)'s contract, not this image's. Override the timing in your compose for tighter detection windows regardless of which probe you use.
 
 ## Plugins
 
@@ -195,7 +219,7 @@ Adds a CrowdSec HTTP bouncer that checks every request against a locally cached 
 
 > **Enforcement-only.** The bouncer pulls the active decision list from the CrowdSec LAPI and blocks IPs. It does not run the CrowdSec engine, generate alerts, or touch the engine's database, so a healthy bouncer does not imply CrowdSec is detecting anything. The engine and its database are a separate, server-side concern; a SQLite-backed engine must run with `use_wal: true`, or LAPI queries serialize and time out under the bouncer's stream load.
 >
-> **Fail-open by default.** If the LAPI is unreachable the bouncer stops learning decisions, without failing a single request and without a healthcheck transition. It does report the outage in the log: every failed decision-stream poll is one ERROR line under the `crowdsec` logger, at the plugin's default 60s poll interval, with no Caddyfile option needed. `alerts.yaml`'s `CaddyCrowdSecLAPIPollFailed` matches those on `{container="caddy"} | json | logger="crowdsec" | level="error"`. A metric reports the same outage as a rate rather than a presence, once `enable_caddy_metrics` is set in the `crowdsec` global block; the shipped `Caddyfile.plugins.example` sets it, and `CaddyCrowdSecLAPIFailing` reads it. What enforcement survives the outage depends on the cache. With a warm cache, which is every case except an outage starting before the first decision-stream response, the decisions already cached keep being enforced for as long as the outage lasts; what stops is the learning, so no new decision arrives and no expiry is applied, and the enforced list silently ages. With a cold cache, an outage that begins before that first response, nothing is enforced. Set `enable_hard_fails` in the `crowdsec` global block to fail requests instead; the tradeoff is that a CrowdSec outage then becomes an outage of everything behind the proxy, which is why the default is the other way. The bouncer's own reachability check is on the admin API, `curl -XPOST http://127.0.0.1:2019/crowdsec/health`, which answers `{"Ok":false}` while the LAPI is unreachable (the capital is the plugin's own JSON shape across all of its admin endpoints, so match on it exactly). It pings the LAPI through the live bouncer and reads no decision, so what it reports is reachability, not what any request was allowed to do. Treat it as a manual or sidecar diagnostic: it answers only POST (a GET is 405'd, so the bundled `/probe` cannot be pointed at it) and it reports the outage in the body while returning HTTP 200, so a status-only prober reads it as success. Its value is an answer for one instance on demand; both shipped rules detect the same outage without it. No surface in this bundle reports the fail-open verdict itself.
+> **Fail-open by default.** If the LAPI is unreachable the bouncer stops learning decisions, without failing a single request and without a healthcheck transition. It does report the outage in the log: every failed decision-stream poll is one ERROR line under the `crowdsec` logger, with no Caddyfile option needed; `CaddyCrowdSecLAPIPollFailed`'s own description in `alerts/logql.yaml` owns the cadence, which is not one number (an established stream polls on the default interval, while a LAPI that never answers from startup is retried much faster than that). `alerts/logql.yaml`'s `CaddyCrowdSecLAPIPollFailed` matches those on `{container="caddy"} | json | logger="crowdsec" | level="error"`. A metric reports the same outage as a rate rather than a presence, once `enable_caddy_metrics` is set in the `crowdsec` global block; the shipped `Caddyfile.plugins.example` sets it, and `CaddyCrowdSecLAPIFailing` reads it. What enforcement survives the outage depends on the cache. With a warm cache, which is every case except an outage starting before the first decision-stream response, the decisions already cached keep being enforced for as long as the outage lasts; what stops is the learning, so no new decision arrives and no expiry is applied, and the enforced list silently ages. With a cold cache, an outage that begins before that first response, nothing is enforced. Set `enable_hard_fails` in the `crowdsec` global block and the bouncer logs at FATAL and exits instead, so the container restarts rather than serving unblocked; the tradeoff is that a CrowdSec outage then becomes an outage of everything behind the proxy, which is why the default is the other way. The bouncer's own reachability check is on the admin API, `curl -XPOST http://127.0.0.1:2019/crowdsec/health`, which answers `{"Ok":false}` while the LAPI is unreachable (the capital is the plugin's own JSON shape across all of its admin endpoints, so match on it exactly). It pings the LAPI through the live bouncer and reads no decision, so what it reports is reachability, not what any request was allowed to do. Treat it as a manual or sidecar diagnostic: it answers only POST (a GET is 405'd, so the bundled `/probe` cannot be pointed at it) and it reports the outage in the body while returning HTTP 200, so a status-only prober reads it as success. Its value is an answer for one instance on demand; both shipped rules detect the same outage without it. No surface in this bundle reports the fail-open verdict itself.
 
 Source: [hslatman/caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer)
 

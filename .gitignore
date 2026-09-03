@@ -7,7 +7,7 @@
 **/.steering-maintenance/
 
 # Local copies created when running the example (see Caddyfile.example / compose.yaml)
-/Caddyfile
+/caddy/
 /data/
 
 # Local secrets for the compose example (CLOUDFLARE_API_TOKEN / CROWDSEC_BOUNCER_KEY)
