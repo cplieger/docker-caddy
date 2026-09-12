@@ -18,7 +18,7 @@ COPY Caddyfile.example /tmp/tests/Caddyfile.example
 COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
 COPY alerts/ /tmp/tests/alerts/
 COPY compose.yaml /tmp/tests/compose.yaml
-RUN sh /tmp/tests/smoke.sh && touch /tests-passed
+RUN sh /tmp/tests/smoke.sh
 
 # Asserts the freshly built probe runs on this arch and exits 1 for an unreachable URL: non-zero is what the HEALTHCHECK below rests on, and 1 rather than the 2 Docker's contract reserves.
 FROM base AS probe-builder
@@ -33,7 +33,8 @@ FROM caddy:2.11@sha256:13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb
 
 FROM donor AS donor-contract
 ARG CADDY_WORKDIR
-COPY --from=builder /usr/bin/caddy /custom-caddy
+# From test, not builder: this COPY is the edge that forces the smoke test to run before parity is checked.
+COPY --from=test /usr/bin/caddy /custom-caddy
 RUN set -eu; \
     custom=$(/custom-caddy version); custom=${custom%% *}; \
     donor=$(caddy version); donor=${donor%% *}; \
@@ -56,8 +57,6 @@ ENV XDG_DATA_HOME=/data
 # From donor-contract, not builder: this COPY is the edge that forces the parity stage to run.
 COPY --chmod=755 --from=donor-contract /custom-caddy /usr/bin/caddy
 COPY --chmod=755 --from=probe-builder /out/probe /probe
-# Force the test stage to build and pass before the runtime image is produced.
-COPY --from=test /tests-passed /tests-passed
 
 EXPOSE 80 443 443/udp 2019
 ARG CADDY_WORKDIR

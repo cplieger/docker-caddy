@@ -2,9 +2,8 @@
 # Build-time smoke test for docker-caddy.
 #
 # Runs in the Dockerfile `test` stage (FROM builder), so the central `ci / validate`
-# docker gate executes it on every PR and push -- the final stage depends on this
-# stage's /tests-passed marker. Asserts the real failure mode for a custom xcaddy
-# build: a plugin silently dropping out of the binary.
+# docker gate executes it on every PR and push. Asserts the real failure mode for a
+# custom xcaddy build: a plugin silently dropping out of the binary.
 #
 # Run locally:  sh tests/smoke.sh   (needs `caddy` on PATH; override CADDY_BIN)
 set -eu
@@ -73,17 +72,25 @@ if CLOUDFLARE_API_TOKEN="$cf_token" CROWDSEC_BOUNCER_KEY='' \
   fail=1
 fi
 
+adapted_file=$(mktemp)
+trap 'rm -f "$bad" "$adapted_file"' EXIT
 for cfg in "$example" "$plugins"; do
-  if ! adapted=$("$caddy" adapt --adapter caddyfile --config "$cfg" 2>&1); then
+  if ! warnings=$("$caddy" adapt --adapter caddyfile --config "$cfg" 2>&1 1>"$adapted_file"); then
     err "FAIL: 'caddy adapt' rejected $cfg while checking the admin bind"
-    err "$adapted"
+    cat "$adapted_file" >&2
+    err "$warnings"
     fail=1
-  elif ! printf '%s\n' "$adapted" \
-    | grep -qE '"listen":[[:space:]]*"localhost:2019"'; then
+  elif [ -n "$warnings" ]; then
+    err "FAIL: 'caddy adapt' emitted a warning for $cfg"
+    err "$warnings"
+    fail=1
+  elif ! grep -qE '"listen":[[:space:]]*"localhost:2019"' "$adapted_file"; then
     err "FAIL: $cfg does not explicitly adapt the admin API to localhost:2019"
     fail=1
   fi
 done
+rm -f "$adapted_file"
+trap 'rm -f "$bad"' EXIT
 
 # caddy validate permits formatting warnings.
 for cfg in "$example" "$plugins"; do
@@ -107,9 +114,6 @@ if ! (
   route_dir=$(mktemp -d)
   trap 'rm -rf "$route_dir"' EXIT
   route_log="$route_dir/caddy.log"
-  extended="$route_dir/Caddyfile.extended"
-  ordered="$route_dir/Caddyfile.ordered"
-  ahead="$route_dir/Caddyfile.ahead"
   admin_env=127.0.0.1:2099
   route_fail=0
 
@@ -133,6 +137,18 @@ if ! (
       route_fail=1
     elif [ "$route_got" != "$route_want" ]; then
       err "FAIL: $route_url returned $route_got, want $route_want"
+      route_fail=1
+    fi
+  }
+
+  assert_route_body() {
+    route_url=$1
+    route_want=$2
+    if ! route_got=$(curl -sS "$route_url"); then
+      err "FAIL: request to $route_url did not complete"
+      route_fail=1
+    elif [ "$route_got" != "$route_want" ]; then
+      err "FAIL: $route_url returned body '$route_got', want '$route_want'"
       route_fail=1
     fi
   }
@@ -165,7 +181,7 @@ if ! (
 
   if start_route_config "$example"; then
     assert_route_status http://127.0.0.1:80/health 200
-    assert_route_status http://127.0.0.1:80/unmatched 404
+    assert_route_body http://127.0.0.1:80/health OK
     stop_route_config
   fi
 
@@ -179,32 +195,28 @@ if ! (
     route_fail=1
   elif start_route_config "$plugins_health"; then
     assert_route_status http://127.0.0.1:80/health 200
-    assert_route_status http://127.0.0.1:80/unmatched 404
+    assert_route_body http://127.0.0.1:80/health OK
     stop_route_config
   fi
 
-  # The documented extension shape, tested with a directive the trap can reach:
-  # `metrics` sorts AFTER `respond`, so its own site block is the remedy the
-  # examples' warning prescribes. A `respond` here would pass whether or not the
-  # published ordering claim held.
-  cp "$example" "$extended"
-  printf '\nhttp://:8081 {\n\tmetrics /metrics\n}\n' >>"$extended"
-  if start_route_config "$extended"; then
-    assert_route_status http://127.0.0.1:8081/metrics 200
-    stop_route_config
-  fi
-
-  # Negative control, and the only assertion that pins the claim both examples
-  # publish: the SAME directive, with a matcher, INSIDE the http://:80 block is
-  # still outranked by the matcherless `respond 404`, because Caddy orders by
-  # DIRECTIVE and not by line.
-  awk '/^http:\/\/:80 \{$/ { print; print "\tmetrics /metrics"; next } { print }' \
-    "$example" >"$ordered"
-  if ! grep -qF 'metrics /metrics' "$ordered"; then
-    err "FAIL: could not add a handler directive to the example's http://:80 block (vacuous control?)"
+  unmanaged="$route_dir/Caddyfile.unmanaged"
+  awk '{ print } /admin localhost:2019/ { print "\tauto_https disable_certs" }' \
+    "$example" >"$unmanaged"
+  printf '%s\n' '' 'foo.example.com {' '  respond 200' '}' >>"$unmanaged"
+  if ! grep -qF 'auto_https disable_certs' "$unmanaged"; then
+    err 'FAIL: could not disable cert management in the example global block (vacuous control?)'
     route_fail=1
-  elif start_route_config "$ordered"; then
-    assert_route_status http://127.0.0.1:80/metrics 404
+  elif start_route_config "$unmanaged"; then
+    if ! unmanaged_got=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
+      -H 'Host: foo.example.com' http://127.0.0.1:80/); then
+      err 'FAIL: unmanaged-certificate redirect probe did not complete'
+      route_fail=1
+    elif [ "$unmanaged_got" != '308 https://foo.example.com/' ]; then
+      err "FAIL: the :80 health block swallowed the automatic redirect with no managed certificate: got $unmanaged_got, want 308 https://foo.example.com/"
+      route_fail=1
+    fi
+    assert_route_status http://127.0.0.1:80/health 200
+    assert_route_body http://127.0.0.1:80/health OK
     stop_route_config
   fi
 
@@ -227,20 +239,6 @@ if ! (
       cat "$route_log" >&2
       route_fail=1
     fi
-  fi
-
-  # `handle` is the tightest of the seven directives documented ahead of
-  # `respond`, so this falls first if `respond` moves ahead of the routing group.
-  # A lone move of header, redir, rewrite, basic_auth, forward_auth or encode is
-  # not witnessed here.
-  awk '/^http:\/\/:80 \{$/ { print; print "\thandle /ahead {"; print "\t\trespond 200"; print "\t}"; next } { print }' \
-    "$example" >"$ahead"
-  if ! grep -qF 'handle /ahead {' "$ahead"; then
-    err "FAIL: could not add a handle block to the example's http://:80 block (vacuous control?)"
-    route_fail=1
-  elif start_route_config "$ahead"; then
-    assert_route_status http://127.0.0.1:80/ahead 200
-    stop_route_config
   fi
 
   exit "$route_fail"
@@ -441,7 +439,7 @@ EOF
       signal_fail=1
     elif ! printf '%s\n' "$build_info" \
       | grep -qE 'github.com/caddyserver/certmagic[[:space:]]+v0\.25\.3'; then
-      err 'FAIL: certmagic moved from the reviewed v0.25.3 alert-signal contract'
+      err 'FAIL: certmagic moved from the reviewed v0.25.3 contract; the tls.renew arm of CaddyCertIssuanceFailed has no behavioural fixture and only this pin stands in for it'
       signal_fail=1
     fi
 
@@ -468,6 +466,50 @@ EOF
       err 'FAIL: caddy did not stop after alert-signal smoke test'
       cat "$signal_log" >&2
       signal_fail=1
+    fi
+  fi
+
+  issuance_cfg="$signal_dir/Caddyfile.issuance"
+  issuance_log="$signal_dir/issuance.log"
+  cat >"$issuance_cfg" <<'EOF'
+{
+  admin localhost:2019
+}
+
+smoke.example.com {
+  tls {
+    issuer acme {
+      dir http://127.0.0.1:9/directory
+    }
+  }
+}
+EOF
+  : >"$issuance_log"
+  if ! XDG_DATA_HOME="$signal_dir/issuance-data" \
+    XDG_CONFIG_HOME="$signal_dir/issuance-config" \
+    "$caddy" start --adapter caddyfile --config "$issuance_cfg" \
+    >"$issuance_log" 2>&1; then
+    err 'FAIL: caddy did not start for certificate-issuance alert smoke test'
+    cat "$issuance_log" >&2
+    signal_fail=1
+  else
+    issuance_i=0
+    while [ "$issuance_i" -lt 10 ] \
+      && ! grep -qF 'could not get certificate from issuer' "$issuance_log"; do
+      issuance_i=$((issuance_i + 1))
+      sleep 1
+    done
+    if ! "$caddy" stop >/dev/null 2>&1; then
+      err 'FAIL: caddy did not stop after certificate-issuance alert smoke test'
+      cat "$issuance_log" >&2
+      signal_fail=1
+    fi
+    if [ ! -s "$issuance_log" ]; then
+      err 'FAIL: certificate-issuance alert smoke test captured no caddy log'
+      signal_fail=1
+    else
+      require_alert_runtime 'tls\\.(obtain|renew)' '"logger":"tls.obtain"' "$issuance_log"
+      require_alert_runtime 'could not get certificate from issuer' 'could not get certificate from issuer' "$issuance_log"
     fi
   fi
 
