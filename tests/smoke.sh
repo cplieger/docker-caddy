@@ -199,6 +199,10 @@ if ! (
     stop_route_config
   fi
 
+  # `disable_certs` is the case, not a shortcut: with no certmagic-managed name Caddy
+  # appends the HTTP->HTTPS redirect BEHIND the user's :80 routes (v2.11.4
+  # autohttps.go:474-479 skips the in-front splice), the only branch a catch-all here can
+  # swallow. Manage the name instead (a loopback `acme_ca`) and this passes on both shapes.
   unmanaged="$route_dir/Caddyfile.unmanaged"
   awk '{ print } /admin localhost:2019/ { print "\tauto_https disable_certs" }' \
     "$example" >"$unmanaged"
@@ -213,6 +217,25 @@ if ! (
       route_fail=1
     elif [ "$unmanaged_got" != '308 https://foo.example.com/' ]; then
       err "FAIL: the :80 health block swallowed the automatic redirect with no managed certificate: got $unmanaged_got, want 308 https://foo.example.com/"
+      route_fail=1
+    fi
+    assert_route_status http://127.0.0.1:80/health 200
+    assert_route_body http://127.0.0.1:80/health OK
+    stop_route_config
+  fi
+
+  plugins_unmanaged="$route_dir/Caddyfile.plugins-unmanaged"
+  printf '%s\n' '{' '  admin localhost:2019' '  auto_https disable_certs' '}' \
+    >"$plugins_unmanaged"
+  cat "$plugins_health" >>"$plugins_unmanaged"
+  printf '%s\n' '' 'foo.example.com {' '  respond 200' '}' >>"$plugins_unmanaged"
+  if start_route_config "$plugins_unmanaged"; then
+    if ! plugins_unmanaged_got=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
+      -H 'Host: foo.example.com' http://127.0.0.1:80/); then
+      err 'FAIL: plugins-example unmanaged-certificate redirect probe did not complete'
+      route_fail=1
+    elif [ "$plugins_unmanaged_got" != '308 https://foo.example.com/' ]; then
+      err "FAIL: the plugins example :80 health block swallowed the automatic redirect with no managed certificate: got $plugins_unmanaged_got, want 308 https://foo.example.com/"
       route_fail=1
     fi
     assert_route_status http://127.0.0.1:80/health 200
@@ -499,6 +522,10 @@ EOF
       issuance_i=$((issuance_i + 1))
       sleep 1
     done
+    if ! grep -qF 'could not get certificate from issuer' "$issuance_log"; then
+      err 'FAIL: certificate-issuance alert smoke test timed out before Caddy reported an issuance failure'
+      signal_fail=1
+    fi
     if ! "$caddy" stop >/dev/null 2>&1; then
       err 'FAIL: caddy did not stop after certificate-issuance alert smoke test'
       cat "$issuance_log" >&2
@@ -508,7 +535,13 @@ EOF
       err 'FAIL: certificate-issuance alert smoke test captured no caddy log'
       signal_fail=1
     else
-      require_alert_runtime 'tls\\.(obtain|renew)' '"logger":"tls.obtain"' "$issuance_log"
+      if ! grep -qF 'logger=~"tls\\.(obtain|renew)" | level="error"' "$signal_alerts"; then
+        err 'FAIL: CaddyCertIssuanceFailed no longer selects the certmagic logger/level conjunction'
+        signal_fail=1
+      elif ! awk 'index($0, "\"logger\":\"tls.obtain\"") && index($0, "\"level\":\"error\"") && index($0, "could not get certificate from issuer") { found = 1 } END { exit !found }' "$issuance_log"; then
+        err 'FAIL: a failed certificate issuance emitted no tls.obtain ERROR record carrying the message CaddyCertIssuanceFailed reads'
+        signal_fail=1
+      fi
       require_alert_runtime 'could not get certificate from issuer' 'could not get certificate from issuer' "$issuance_log"
     fi
   fi
