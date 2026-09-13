@@ -9,10 +9,11 @@
 # CaddyStartupFailed selects; on a reload it is the structured `error` field, on
 # the `failed to reload config from file` line CaddyReloadRejected selects, on the
 # watcher's `applying latest config`, and on the admin API's `request error` -
-# the last two reach the store with no rule here selecting them. The adapt arm is
-# the exception: `caddy adapt` never resolves `{env.VAR}`, so an `adapting config
-# using caddyfile:` cause carries no credential. Treat any token that appears in
-# any of them as exposed and rotate it. The sibling
+# the last two reach the store with no rule here selecting them. For
+# Caddyfiles using `{env.VAR}`, the adapt arm is the exception: `caddy adapt`
+# never resolves that placeholder form, so an `adapting config using caddyfile:`
+# cause carries no credential. Treat any token that appears in any of them as
+# exposed and rotate it. The sibling
 # alerts/promql.yaml carries the rules a Prometheus or Mimir ruler evaluates.
 # Load each file into its own ruler: neither ruler parses the other's expressions.
 #
