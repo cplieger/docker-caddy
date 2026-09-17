@@ -4,8 +4,6 @@
 ![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue)
 ![built from: caddy-builder](https://img.shields.io/badge/built%20from-caddy--builder-1F88C0?logo=caddy)
 ![runtime: distroless/static](https://img.shields.io/badge/runtime-distroless%2Fstatic-blue)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13203/badge)](https://www.bestpractices.dev/projects/13203)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/docker-caddy/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/docker-caddy)
 [![SBOM](https://img.shields.io/badge/SBOM-SPDX-1D4ED8)](https://github.com/cplieger/docker-caddy/releases)
 
 <!-- hub-overview BEGIN -->
@@ -224,7 +222,7 @@ The image is published with [cosign](https://github.com/sigstore/cosign) signatu
 
 ```bash
 cosign verify ghcr.io/cplieger/docker-caddy:latest \
-    --certificate-identity-regexp "https://github.com/cplieger/docker-caddy/.github/workflows/.*" \
+    --certificate-identity-regexp '^https://github\.com/cplieger/ci/\.github/workflows/docker-release\.yaml@' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
