@@ -29,7 +29,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
     && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; }
 
-FROM caddy:2.11@sha256:13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb6b12017 AS donor
+FROM caddy:2.11@sha256:bfbff8b17bbd229b0255dbd33173646339e5afd4b0920f5e0fecbb6ee6d6c4dd AS donor
 
 FROM donor AS donor-contract
 ARG CADDY_WORKDIR
