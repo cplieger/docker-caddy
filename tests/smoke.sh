@@ -20,12 +20,20 @@ example="$d/Caddyfile.example"
 
 # Reject a malformed config and pin the raw startup prefix alerts/logql.yaml selects.
 # Driven through `caddy run`, the image's own CMD, because that produces the
-# prefix. The timeout bounds a build that accepts this file and serves forever.
-# Its exit status is deliberately ignored because GNU and BusyBox differ.
+# prefix and because its exit status is the container's: a rejection that exited
+# 0 would read as a clean stop to `restart: on-failure`. Exactly 1 is asserted
+# rather than non-zero because the timeout, which bounds a build that accepts
+# this file and serves forever, reports expiry as 124 (GNU) or 143 (BusyBox).
 bad=$(mktemp)
 trap 'rm -f "$bad"' EXIT
 printf '%s\n' ':80 {' >"$bad"
-out=$(timeout 10 "$caddy" run --adapter caddyfile --config "$bad" 2>&1) || true
+bad_rc=0
+out=$(timeout 10 "$caddy" run --adapter caddyfile --config "$bad" 2>&1) || bad_rc=$?
+if [ "$bad_rc" -ne 1 ]; then
+  err "FAIL: 'caddy run' on a malformed Caddyfile exited $bad_rc, want 1 (0 hides the rejection from the restart policy; 124 or 143 means the file was accepted and served)"
+  err "$out"
+  fail=1
+fi
 if ! printf '%s\n' "$out" | grep -q '^Error: '; then
   err "FAIL: 'caddy run' on a malformed Caddyfile did not emit the Error: prefix alerts/logql.yaml selects"
   err "$out"
