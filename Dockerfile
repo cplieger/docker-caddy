@@ -6,11 +6,21 @@ ENV GOTOOLCHAIN=auto
 
 FROM base AS builder
 
+COPY LICENSE NOTICE /src/
+COPY licenses/ /src/licenses/
+COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
+# XCADDY_SKIP_CLEANUP keeps the generated build module so its dependency graph can be walked
+# after the build: xcaddy builds outside any module of ours, and the license tree has to
+# come from the module set that actually went into /usr/bin/caddy.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    xcaddy build \
+    XCADDY_SKIP_CLEANUP=1 xcaddy build \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
-        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.14.1
+        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.14.1 \
+    && set -- /tmp/buildenv_* && [ "$#" -eq 1 ] && [ -d "$1" ] \
+    && cp /src/LICENSE /src/NOTICE "$1"/ && cp -r /src/licenses "$1"/ \
+    && sh /usr/local/bin/collect-licenses.sh --src "$1" --name docker-caddy . \
+    && rm -rf "$1"
 
 FROM builder AS test
 COPY tests/ /tmp/tests/
@@ -24,10 +34,16 @@ RUN sh /tmp/tests/smoke.sh
 FROM base AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health/probe
 ARG HEALTH_PROBE_VERSION=v1.0.4
+COPY LICENSE NOTICE /src/
+COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
+WORKDIR /src
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
-    && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; }
+    && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; } \
+    && go mod init docker-caddy >/dev/null 2>&1 \
+    && GOFLAGS=-mod=mod go get "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
+    && sh /usr/local/bin/collect-licenses.sh --name docker-caddy github.com/cplieger/health/probe/cmd/probe
 
 FROM caddy:2.11@sha256:14a9c00d4e833ebc2b65d36515b37bde3b73f0b323a2663aaafc88953d8c4e3f AS donor
 
@@ -57,6 +73,8 @@ ENV XDG_DATA_HOME=/data
 # From donor-contract, not builder: this COPY is the edge that forces the parity stage to run.
 COPY --chmod=755 --from=donor-contract /custom-caddy /usr/bin/caddy
 COPY --chmod=755 --from=probe-builder /out/probe /probe
+COPY --from=builder /out/usr/share/licenses /usr/share/licenses
+COPY --from=probe-builder /out/usr/share/licenses /usr/share/licenses
 
 EXPOSE 80 443 443/udp 2019
 ARG CADDY_WORKDIR
