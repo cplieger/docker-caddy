@@ -7,3 +7,7 @@
 !alerts/
 !compose.yaml
 !tests/
+!LICENSE
+!NOTICE
+!licenses/
+!scripts/collect-licenses.sh

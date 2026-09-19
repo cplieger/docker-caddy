@@ -256,4 +256,6 @@ This project was built with AI-assisted tooling using [Claude](https://claude.co
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE). The image carries the license text of every bundled component under `/usr/share/licenses/`.
+
+The image packages [Caddy](https://caddyserver.com/) (Apache-2.0, source at <https://github.com/caddyserver/caddy>), built with `xcaddy` from the official `caddy:2.11-builder` image the Dockerfile pins by digest, together with the [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare) and [caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer) plugins (both Apache-2.0) at the versions the Dockerfile's `--with` flags name. The build applies no patches. One linked module, [hslatman/ipstore](https://github.com/hslatman/ipstore), publishes no license file and carries the Apache-2.0 header in every source file; the packager supplies its license text under `licenses/` in this repository, and it ships in the image beside the others.
