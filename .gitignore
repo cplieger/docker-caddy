@@ -12,3 +12,6 @@
 
 # Local secrets for the compose example (CLOUDFLARE_API_TOKEN / CROWDSEC_BOUNCER_KEY)
 .env
+
+# Agent workflow scratch
+.agents/
