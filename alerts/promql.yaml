@@ -123,10 +123,11 @@ groups:
             Note this gauge moves only when Caddy attempts to apply a config
             in-process. A config that fails to READ or ADAPT never reaches that
             attempt and leaves this gauge at 1. For an opted-in `--watch` that
-            case is CaddyConfigWatcherStopped. At STARTUP that case is
-            CaddyStartupFailed, and it is the arm a deployment on the image's
-            own CMD hits first: the process exits before this gauge has a
-            series at all. For an explicit reload that case is
+            case is CaddyConfigWatcherStopped. At STARTUP that case is a
+            process exit before this gauge has a series at all, the arm a
+            deployment on the image's own CMD hits first; CaddyStartupFailed
+            reports it only on a Caddy version that prints the cause, and its
+            description says which those are. For an explicit reload that case is
             CaddyReloadRejected, which selects the ERROR line the signal
             handler writes on the DEFAULT logger; `caddy reload` reports the
             parse error as an exit status rather than into the container's log

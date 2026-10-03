@@ -42,10 +42,16 @@ The Dockerfile is the program; this repo has no Go source of its own.
   `tests/smoke.sh`, which provokes the condition on the real binary and greps
   the bundle and the captured output for the same selector. Renaming a
   selector in `alerts/` without moving the assertion fails the build; a Caddy
-  bump that renames the upstream string does too, which is the point.
-- The container's exit status is `caddy`'s. A rejected Caddyfile exits 1 and
-  prints an `Error:` line, and both suites assert exactly that; nothing may
-  wrap the process in a way that would swallow it.
+  bump that renames the upstream string does too, which is the point. The one
+  set of lines the build stage cannot provoke is `CaddyCertManagementFailing`'s
+  successes and its renewal, `job failed` and `initiating certificate
+  management` failures, which need a reachable CA or a broken store;
+  the script pins the certmagic version instead, so a certmagic bump fails the
+  build until those lines are re-read in the new version's source.
+- The container's exit status is `caddy`'s. A rejected Caddyfile exits 1, and
+  one that fails to load also prints the line `CaddyStartupFailed` selects;
+  both suites assert exactly that, and nothing may wrap the process in a way
+  that would swallow it.
 
 ## Running checks locally
 

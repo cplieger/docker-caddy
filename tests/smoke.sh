@@ -18,27 +18,63 @@ err() { printf '%s\n' "$*" >&2; }
 example="$d/Caddyfile.example"
 [ -f "$example" ] || example="$d/../Caddyfile.example"
 
-# Reject a malformed config and pin the raw startup prefix alerts/logql.yaml selects.
-# Driven through `caddy run`, the image's own CMD, because that produces the
-# prefix and because its exit status is the container's: a rejection that exited
-# 0 would read as a clean stop to `restart: on-failure`. Exactly 1 is asserted
-# rather than non-zero because the timeout, which bounds a build that accepts
-# this file and serves forever, reports expiry as 124 (GNU) or 143 (BusyBox).
+alerts="$d/alerts"
+[ -d "$alerts" ] || alerts="$d/../alerts"
+
+# CaddyStartupFailed's selector is read out of the bundle and run against the
+# binary, so the rule and the output it must match cannot drift apart. grep -E
+# stands in for Loki's RE2 only while the pattern uses syntax both agree on.
+# The backticks are LogQL's raw-string quotes, not a shell expansion.
+# shellcheck disable=SC2016
+startup_re=$(cat "$alerts"/*.yaml 2>/dev/null \
+  | awk '/^      - alert: CaddyStartupFailed$/ { r = 1 } r && /^        for:/ { exit } r { print }' \
+  | sed -n 's/^.*|~ `\(.*\)`.*$/\1/p')
+if [ -z "$startup_re" ]; then
+  err "FAIL: could not read the CaddyStartupFailed line filter from $alerts (renamed or reshaped?)"
+  fail=1
+fi
+
+# One fixture per startup cause, through `caddy run`, the image's own CMD, whose
+# exit status is the container's: 0 would read as a clean stop to
+# `restart: on-failure`. Exactly 1, because the timeout bounding a build that
+# serves the file reports expiry as 124 (GNU) or 143 (BusyBox).
 bad=$(mktemp)
-trap 'rm -f "$bad"' EXIT
+unloadable=$(mktemp)
+trap 'rm -f "$bad" "$unloadable"' EXIT
 printf '%s\n' ':80 {' >"$bad"
-bad_rc=0
-out=$(timeout 10 "$caddy" run --adapter caddyfile --config "$bad" 2>&1) || bad_rc=$?
-if [ "$bad_rc" -ne 1 ]; then
-  err "FAIL: 'caddy run' on a malformed Caddyfile exited $bad_rc, want 1 (0 hides the rejection from the restart policy; 124 or 143 means the file was accepted and served)"
-  err "$out"
-  fail=1
-fi
-if ! printf '%s\n' "$out" | grep -q '^Error: '; then
-  err "FAIL: 'caddy run' on a malformed Caddyfile did not emit the Error: prefix alerts/logql.yaml selects"
-  err "$out"
-  fail=1
-fi
+printf '%s\n' '{' '  admin off' '}' '' 'https://localhost:8443 {' \
+  '  tls /nonexistent/cert.pem /nonexistent/key.pem' '}' >"$unloadable"
+# Only the load cause has to print: since v2.11.5 the read and adapt causes go to
+# a log buffer nothing flushes (caddyserver/caddy#7962). Any error line those two
+# do print must still match, which binds the selector once upstream fixes it.
+for cause in read adapt load; do
+  case "$cause" in
+    read) cfg=/nonexistent/Caddyfile ;;
+    adapt) cfg=$bad ;;
+    load) cfg=$unloadable ;;
+  esac
+  bad_rc=0
+  out=$(timeout 10 "$caddy" run --adapter caddyfile --config "$cfg" 2>&1) || bad_rc=$?
+  if [ "$bad_rc" -ne 1 ]; then
+    err "FAIL: 'caddy run' on a config that fails to $cause exited $bad_rc, want 1 (0 hides the rejection from the restart policy; 124 or 143 means the file was accepted and served)"
+    err "$out"
+    fail=1
+  fi
+  [ -n "$startup_re" ] || continue
+  if printf '%s\n' "$out" | grep -qE -- "$startup_re"; then
+    continue
+  elif [ "$cause" = load ]; then
+    err "FAIL: 'caddy run' on a config that fails to load printed nothing the CaddyStartupFailed selector matches"
+    err "$out"
+    fail=1
+  elif printf '%s\n' "$out" | grep -qE '^Error: |"level":"error"'; then
+    err "FAIL: 'caddy run' on a config that fails to $cause printed an error line the CaddyStartupFailed selector misses"
+    err "$out"
+    fail=1
+  fi
+done
+rm -f "$unloadable"
+trap 'rm -f "$bad"' EXIT
 
 # Validate plugin directives with dummy credentials, never caller secrets.
 plugins="$d/Caddyfile.plugins.example"
@@ -424,13 +460,6 @@ EOF
       signal_fail=1
     fi
 
-    # ALERT ARM for the startup prefix. Its RUNTIME arm is the `caddy run` grep at the
-    # top of this file, which cannot reach $signal_alerts from outside this subshell.
-    if ! grep -qF '^Error: ' "$signal_alerts"; then
-      err 'FAIL: the alerts/ bundle no longer selects the ^Error: startup prefix driven at the top of this file'
-      signal_fail=1
-    fi
-
     # A rejected in-process load must move the gauge CaddyConfigReloadFailed reads. The
     # cause is in the fixture, not in the environment: `caddy adapt` never resolves
     # `{env.VAR}` (README.md:96), and :70-72 already proves an empty bouncer key fails
@@ -469,8 +498,8 @@ EOF
       err "$build_info"
       signal_fail=1
     elif ! printf '%s\n' "$build_info" \
-      | grep -qE 'github.com/caddyserver/certmagic[[:space:]]+v0\.25\.3'; then
-      err 'FAIL: certmagic moved from the reviewed v0.25.3 contract; the tls.renew arm of CaddyCertIssuanceFailed has no behavioural fixture and only this pin stands in for it'
+      | grep -qE 'github.com/caddyserver/certmagic[[:space:]]+v0\.25\.6([[:space:]]|$)'; then
+      err 'FAIL: certmagic moved from the reviewed v0.25.6 contract; CaddyCertManagementFailing reads its renewal and job failure lines and both success lines by message and field, no fixture here produces them, and only this pin stands in for them'
       signal_fail=1
     fi
 
@@ -492,6 +521,12 @@ EOF
       sleep 1
     done
     require_alert_runtime 'failed to reload config from file' 'failed to reload config from file' "$signal_log"
+    # The watcher and reload records carry a startup cause in their `error` field
+    # on a process that is still serving. Single shot: the poll above flushed it.
+    if [ -n "$startup_re" ] && grep -qE -- "$startup_re" "$signal_log"; then
+      err 'FAIL: the CaddyStartupFailed selector matches a rejected reload of a running Caddy'
+      signal_fail=1
+    fi
 
     if ! "$caddy" stop >/dev/null 2>&1; then
       err 'FAIL: caddy did not stop after alert-signal smoke test'
@@ -543,11 +578,25 @@ EOF
       err 'FAIL: certificate-issuance alert smoke test captured no caddy log'
       signal_fail=1
     else
-      if ! grep -qF 'logger=~"tls\\.(obtain|renew)" | level="error"' "$signal_alerts"; then
-        err 'FAIL: CaddyCertIssuanceFailed no longer selects the certmagic logger/level conjunction'
+      # The failure half of CaddyCertManagementFailing, read out of the bundle: its
+      # line filter, level and logger regex must all select the issuer ERROR record,
+      # and that record must carry the `identifier` the rule groups by. The
+      # backticks are LogQL's raw-string quotes, not a shell expansion.
+      cert_fail=$(awk '/^      - alert: CaddyCertManagementFailing$/ { r = 1 } r && /^ *unless / { exit } r { print }' "$signal_alerts")
+      # shellcheck disable=SC2016
+      cert_line=$(printf '%s\n' "$cert_fail" | sed -n 's/^.*|= `\([^`]*\)`.*$/\1/p')
+      cert_level=$(printf '%s\n' "$cert_fail" | sed -n 's/^ *| level="\([^"]*\)"$/\1/p')
+      cert_logger=$(printf '%s\n' "$cert_fail" | sed -n 's/^.*| logger=~"\([^"]*\)".*$/\1/p' | sed 's/\\\\/\\/g')
+      if [ -z "$cert_line" ] || [ -z "$cert_level" ] || [ -z "$cert_logger" ] \
+        || ! printf '%s\n' "$cert_fail" | grep -qF '.identifier'; then
+        err "FAIL: could not read the CaddyCertManagementFailing line filter, level, logger regex and identifier grouping from $signal_alerts (renamed or reshaped?)"
         signal_fail=1
-      elif ! awk 'index($0, "\"logger\":\"tls.obtain\"") && index($0, "\"level\":\"error\"") && index($0, "could not get certificate from issuer") { found = 1 } END { exit !found }' "$issuance_log"; then
-        err 'FAIL: a failed certificate issuance emitted no tls.obtain ERROR record carrying the message CaddyCertIssuanceFailed reads'
+      elif ! grep -F -- "\"level\":\"$cert_level\"" "$issuance_log" \
+        | grep -F 'could not get certificate from issuer' \
+        | grep -F -- "$cert_line" \
+        | grep -E -- "\"logger\":\"($cert_logger)\"" \
+        | grep -qF '"identifier":"smoke.example.com"'; then
+        err 'FAIL: a failed certificate issuance emitted no ERROR record that the CaddyCertManagementFailing line filter, level and logger regex select with the identifier it groups by'
         signal_fail=1
       fi
       require_alert_runtime 'could not get certificate from issuer' 'could not get certificate from issuer' "$issuance_log"
