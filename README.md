@@ -99,13 +99,13 @@ Reference either credential only as `{env.VAR}`, never as a literal in the Caddy
 
 ### Ports
 
-| Port | Protocol | Purpose |
-| --- | --- | --- |
-| `80` | TCP | HTTP: HTTP-01 challenges and redirects to HTTPS |
-| `443` | TCP | HTTPS / HTTP/2 |
-| `443` | UDP | HTTP/3 (QUIC) |
-| `2019` | TCP | Caddy's admin API (unauthenticated): loopback-bound by default, so publishing it reaches a listener that answers only inside the container |
-| `2020` | TCP | Prometheus metrics, only if your Caddyfile opens the listener |
+| Port | Description |
+| --- | --- |
+| `80/tcp` | HTTP: HTTP-01 challenges and redirects to HTTPS |
+| `443/tcp` | HTTPS / HTTP/2 |
+| `443/udp` | HTTP/3 (QUIC) |
+| `2019/tcp` | Caddy's admin API (unauthenticated): loopback-bound by default, so publishing it reaches a listener that answers only inside the container |
+| `2020/tcp` | Prometheus metrics, only if your Caddyfile opens the listener |
 
 The admin API port is declared for documentation and for in-namespace scrapers; publishing it is only useful if a Caddyfile deliberately rebinds `admin` off loopback, and at that point it is an unauthenticated control plane on a routable address. The `2020` listener is a Caddyfile decision rather than an image one: nothing in the image opens it, the shipped [`Caddyfile.plugins.example`](./Caddyfile.plugins.example) does (`:2020 { metrics /metrics }`) and `Caddyfile.example` does not, and it is not in the image's `EXPOSE`. The compose example publishes no host port for it, but a site address with no host binds every interface in the container, so any container on the same Docker network can read the series.
 
@@ -225,14 +225,14 @@ cosign verify ghcr.io/cplieger/docker-caddy:latest \
 
 All dependencies are updated automatically via [Renovate](https://github.com/renovatebot/renovate) and pinned by digest or version for reproducibility.
 
-| Dependency                  | Source                                                                   |
-| --------------------------- | ------------------------------------------------------------------------ |
-| caddy (builder)             | [Docker Hub](https://hub.docker.com/_/caddy)                             |
-| caddy (contract donor)      | [Docker Hub](https://hub.docker.com/_/caddy)                             |
-| distroless/static (runtime) | [gcr.io/distroless](https://github.com/GoogleContainerTools/distroless)  |
-| caddy-dns/cloudflare        | [GitHub](https://github.com/caddy-dns/cloudflare)                        |
-| caddy-crowdsec-bouncer      | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer)             |
-| health (probe binary)       | [GitHub](https://github.com/cplieger/health)                             |
+| Dependency | Source |
+| --- | --- |
+| caddy (builder) | [Docker Hub](https://hub.docker.com/_/caddy) |
+| caddy (contract donor) | [Docker Hub](https://hub.docker.com/_/caddy) |
+| distroless/static (runtime) | [gcr.io/distroless](https://github.com/GoogleContainerTools/distroless) |
+| caddy-dns/cloudflare | [GitHub](https://github.com/caddy-dns/cloudflare) |
+| caddy-crowdsec-bouncer | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer) |
+| health (probe binary) | [GitHub](https://github.com/cplieger/health) |
 
 ## Credits
 
