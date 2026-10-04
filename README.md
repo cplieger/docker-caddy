@@ -100,7 +100,7 @@ Publish only ports 80 and 443. Caddy's admin API on port 2019 has no login, and 
 
 Write each credential in the Caddyfile as `{env.CLOUDFLARE_API_TOKEN}` or `{env.CROWDSEC_BOUNCER_KEY}`. The admin API returns a credential pasted into the Caddyfile to anything that can reach it. When the Cloudflare plugin rejects a token for its format, it prints the whole token in the container log. If a token appears in a startup or reload error, treat it as exposed and create a new one.
 
-The container runs as root, like the official Caddy image, so it can bind ports 80 and 443. [Security](docs/security.md) covers running it as another user, what the image contains and how to verify its signature.
+The container runs as root, like the official Caddy image, so it can bind ports 80 and 443. [Security](docs/hardening.md) covers running it as another user, what the image contains and how to verify its signature.
 
 ## Troubleshooting
 
@@ -123,7 +123,7 @@ Caddy serves Prometheus metrics from its admin API and from the `:2020` listener
 - [Plugins](docs/plugins.md) explains both plugins and how the bouncer behaves when CrowdSec is down.
 - [Troubleshooting](docs/troubleshooting.md) covers the healthcheck in depth, an end-to-end health probe and quieter admin logs.
 - [Monitoring and alerts](docs/monitoring.md) lists the alert rules and their prerequisites.
-- [Security](docs/security.md) covers running as another user, what the image contains and signature checks.
+- [Security](docs/hardening.md) covers running as another user, what the image contains and signature checks.
 - [How docker-caddy is built](docs/how-it-works.md) is for readers who want the build design.
 
 ## Credits
