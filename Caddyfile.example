@@ -1,12 +1,12 @@
 # Minimal example Caddyfile for ghcr.io/cplieger/docker-caddy.
 #
-# Usage: copy this file to `caddy/Caddyfile` (compose.yaml mounts the ./caddy
-# DIRECTORY at /etc/caddy), then edit it for your sites:
+# Copy this file to `caddy/Caddyfile`, then edit it for your sites. compose.yaml
+# mounts the ./caddy folder at /etc/caddy.
 #     mkdir -p caddy && cp Caddyfile.example caddy/Caddyfile
 #
-# For a site block that uses the bundled plugins, and for the two credentials
-# it needs, see Caddyfile.plugins.example. For healthcheck overrides that probe
-# the /health route below, see the README.
+# Caddyfile.plugins.example has a site block that uses the bundled plugins and
+# the two credentials it needs. docs/troubleshooting.md, "Check the serving
+# path too", shows a healthcheck override that probes the /health route below.
 {
 	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
 	# directive outranks the CADDY_ADMIN env var (which only supplies the
