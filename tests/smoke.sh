@@ -462,7 +462,7 @@ EOF
 
     # A rejected in-process load must move the gauge CaddyConfigReloadFailed reads. The
     # cause is in the fixture, not in the environment: `caddy adapt` never resolves
-    # `{env.VAR}` (README.md:96), and :70-72 already proves an empty bouncer key fails
+    # `{env.VAR}` (docs/configuration.md "Credentials"), and :70-72 already proves an empty bouncer key fails
     # provisioning. The `adapt` call is a GUARD and not the subject: it proves the
     # fixture still loads locally, so a zero exit from `caddy reload` below can only
     # mean the running server accepted it.
