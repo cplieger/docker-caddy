@@ -1,7 +1,7 @@
 # check=error=true
 ARG CADDY_WORKDIR=/srv
 
-FROM caddy:2.11-builder@sha256:f5b1a66449d305280e559dba0ab9f7ce9a2a14c527c79d7c6fb48abc8f895818 AS base
+FROM caddy:2.11-builder@sha256:9dd8970b7948356f54512caf6a448c55eff6c4a9fd9106d980423248bdfd65cb AS base
 ENV GOTOOLCHAIN=auto
 
 FROM base AS builder
@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && GOFLAGS=-mod=mod go get "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
     && sh /usr/local/bin/collect-licenses.sh --name docker-caddy github.com/cplieger/health/probe/cmd/probe
 
-FROM caddy:2.11@sha256:3422ce6de165df66534f9b9ba50efaf457114ec961763cc52f5dbdaac2972d73 AS donor
+FROM caddy:2.11@sha256:8dc9fa87b36b25303d1c67d2a09f5824b7f3bfd72cb052f246e5da2133fe29a8 AS donor
 
 FROM donor AS donor-contract
 ARG CADDY_WORKDIR
