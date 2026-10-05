@@ -1,6 +1,6 @@
 # How docker-caddy is built
 
-This page describes how the image is assembled and what that means for Caddy's behavior. It is for readers who want to know how close the image is to the official one. [CONTRIBUTING.md](../CONTRIBUTING.md) has the build stages in detail.
+This page describes how the image is assembled and what that means for Caddy's behavior. It is for readers who want to know how close the image is to the official one. The [Dockerfile](../Dockerfile) has the build stages in detail.
 
 ## Built from the official builder
 
