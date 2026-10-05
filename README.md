@@ -132,7 +132,7 @@ docker-caddy packages [Caddy](https://github.com/caddyserver/caddy) by [@mholt](
 
 ## Contributing
 
-Issues and pull requests are welcome. Open an issue first for a larger change. [CONTRIBUTING.md](CONTRIBUTING.md) covers the build stages, the checks the build runs and how to run both smoke tests locally.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Disclaimer
 
