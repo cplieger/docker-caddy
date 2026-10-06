@@ -9,13 +9,13 @@
 # path too", shows a healthcheck override that probes the /health route below.
 {
 	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
-	# directive outranks the CADDY_ADMIN env var (which only supplies the
-	# default used when no admin address is configured).
+	# directive outranks the CADDY_ADMIN env var, which only supplies the
+	# default used when no admin address is configured.
 	admin localhost:2019
 }
 
-# /health must live in an explicit `http://:80` block: Caddy auto-redirects :80 -> :443
-# for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
+# /health must live in an explicit `http://:80` block. Caddy redirects port 80 to
+# 443 for HTTPS site blocks, so a /health route inside one would answer 308.
 http://:80 {
 	respond /health "OK" 200
 }

@@ -1,25 +1,25 @@
 # Example Caddyfile for ghcr.io/cplieger/docker-caddy using both bundled plugins.
 #
-# Usage: copy this file to `caddy/Caddyfile` (compose.yaml mounts the ./caddy
-# DIRECTORY at /etc/caddy):
+# Usage: copy this file to `caddy/Caddyfile`, because compose.yaml mounts the
+# ./caddy directory at /etc/caddy:
 #     mkdir -p caddy && cp Caddyfile.plugins.example caddy/Caddyfile
 #
 # Then make three edits:
-#   1. the site address;
-#   2. the reverse_proxy target;
-#   3. `crowdsec.api_url` -> a CrowdSec LAPI address reachable from THIS
-#      container. The shipped http://crowdsec:8080 assumes a `crowdsec` service
+#   1. Set the site address.
+#   2. Set the reverse_proxy target.
+#   3. Set `crowdsec.api_url` to a CrowdSec LAPI address this container can
+#      reach. The shipped http://crowdsec:8080 assumes a `crowdsec` service
 #      alias on a shared Compose network, which the one-service compose.yaml
 #      example does not create. The bouncer fails open on a LAPI it cannot
 #      reach, so a wrong value here serves every request unblocked.
 #
 # Both plugins refuse to provision without their credential, so the environment
-# must carry CLOUDFLARE_API_TOKEN and CROWDSEC_BOUNCER_KEY (compose.yaml passes
-# both).
+# must carry CLOUDFLARE_API_TOKEN and CROWDSEC_BOUNCER_KEY. compose.yaml passes
+# both.
 {
 	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
-	# directive outranks the CADDY_ADMIN env var (which only supplies the
-	# default used when no admin address is configured).
+	# directive outranks the CADDY_ADMIN env var, which only supplies the
+	# default used when no admin address is configured.
 	admin localhost:2019
 
 	# The bouncer registers no directive order, so a site-block `crowdsec`
@@ -27,7 +27,7 @@
 	order crowdsec first
 	# Registers Caddy's per-route HTTP instrumentation, which
 	# alerts/promql.yaml's CaddyHigh5xxRate reads. Caddy documents a throughput
-	# cost on very busy servers, so delete this line to decline it; the 5xx rule
+	# cost on very busy servers, so delete this line to decline it. The 5xx rule
 	# then has no series and cannot fire.
 	metrics
 
@@ -49,8 +49,8 @@
 	metrics /metrics
 }
 
-# /health must live in an explicit `http://:80` block: Caddy auto-redirects :80 -> :443
-# for HTTPS site blocks, so a /health route inside one would 308 rather than answer.
+# /health must live in an explicit `http://:80` block. Caddy redirects port 80 to
+# 443 for HTTPS site blocks, so a /health route inside one would answer 308.
 http://:80 {
 	respond /health "OK" 200
 }
@@ -65,7 +65,8 @@ http://:80 {
 	# example. Both controls are reverse_proxy subdirectives, not site
 	# directives, so expand the one-liner below into
 	# `reverse_proxy backend:3000 { ... }` and put
-	# `fail_duration <duration>` (passive) or `health_uri <uri>` (active) inside
-	# the braces. Either one changes proxy behaviour on upstream errors.
+	# `fail_duration <duration>` for passive checks or `health_uri <uri>` for
+	# active ones inside the braces. Either one changes proxy behaviour on
+	# upstream errors.
 	reverse_proxy backend:3000
 }
