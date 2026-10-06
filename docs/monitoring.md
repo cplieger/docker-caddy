@@ -10,7 +10,7 @@ Caddy writes its log as JSON whenever standard error is not an interactive termi
 
 ## Alerting
 
-The rules ship as one file per expression language, because each ruler parses every expression in the file it loads and neither parses the other's language. The six PromQL rules in [`alerts/promql.yaml`](../alerts/promql.yaml) go to Prometheus or the Mimir ruler. The five LogQL rules in [`alerts/logql.yaml`](../alerts/logql.yaml) go to [Loki's ruler](https://grafana.com/docs/loki/latest/alert/). Firing alerts go through your Alertmanager either way.
+The six PromQL rules in [`alerts/promql.yaml`](../alerts/promql.yaml) go to Prometheus or the Mimir ruler, and the five LogQL rules in [`alerts/logql.yaml`](../alerts/logql.yaml) go to Loki's ruler. [Loading metric alert rules](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#loading-metric-alert-rules) and [Loading an app's alert rules](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#loading-an-apps-alert-rules) show how.
 
 The log rules cover conditions with no series a Prometheus ruler can rely on. Caddy registers no series at all for some of them. The others have one only when a Caddyfile option is set, or only for some of their causes. The sections below the table say what each rule needs and how it behaves.
 

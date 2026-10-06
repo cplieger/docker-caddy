@@ -30,7 +30,7 @@ docker-caddy is free software under the Apache-2.0 license.
 
 ## Quick start
 
-The image is on GitHub Container Registry and Docker Hub, for `amd64` and `arm64`. This is the [`compose.yaml`](compose.yaml) in this repository. The tags are `latest` and this project's own release numbers `vX.Y.Z`, `vX.Y` and `vX`. They do not follow Caddy's version numbers. To see the Caddy version a tag carries, run `docker run --rm ghcr.io/cplieger/docker-caddy:latest caddy version`.
+The image is on GitHub Container Registry and Docker Hub, for `amd64` and `arm64`. This is the [`compose.yaml`](compose.yaml) in this repository. The [tags](https://github.com/cplieger/docs/blob/main/docs/images.md#which-tag-to-use) are `latest` and this project's own release numbers `vX.Y.Z`, `vX.Y` and `vX`. They do not follow Caddy's version numbers. To see the Caddy version a tag carries, run `docker run --rm ghcr.io/cplieger/docker-caddy:latest caddy version`.
 
 ```yaml
 services:
