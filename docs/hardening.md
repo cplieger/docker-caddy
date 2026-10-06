@@ -18,7 +18,7 @@ Under Docker's defaults that is all. Containers start with `net.ipv4.ip_unprivil
 
 ## What the image contains
 
-The runtime is `gcr.io/distroless/static`. It has no shell, no package manager and no operating system packages to patch or scan.
+The runtime is `gcr.io/distroless/static`, built on Debian. It has no shell and no package manager. It carries a few Debian data packages, such as time zone data and CA certificates. Image scans report fixes for those, and they arrive when Renovate updates the base image digest.
 
 Two CVEs in indirect Go modules still show up in scans, `CVE-2026-44982` in CrowdSec and `CVE-2026-2303` in mongo-driver. Neither is reachable in this build. The bundled bouncer links only CrowdSec's LAPI client, so the vulnerable AppSec body parser and the MongoDB GSSAPI bindings are never compiled in. They clear once the bouncer plugin supports CrowdSec 1.7.8 or later.
 
