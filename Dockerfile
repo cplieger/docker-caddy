@@ -33,7 +33,7 @@ RUN sh /tmp/tests/smoke.sh
 # Asserts the freshly built probe runs on this arch and exits 1 for an unreachable URL: non-zero is what the HEALTHCHECK below rests on, and 1 rather than the 2 Docker's contract reserves.
 FROM base AS probe-builder
 # renovate: datasource=go depName=github.com/cplieger/health/probe
-ARG HEALTH_PROBE_VERSION=v1.0.5
+ARG HEALTH_PROBE_VERSION=v1.0.6
 COPY LICENSE NOTICE /src/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
 WORKDIR /src
