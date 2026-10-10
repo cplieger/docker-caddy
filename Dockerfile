@@ -9,6 +9,11 @@ FROM base AS builder
 COPY LICENSE NOTICE /src/
 COPY licenses/ /src/licenses/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
+# Raises x/net above the v0.59.0 the builder's Caddy v2.11.7 requires (CVE-2026-78669, -78663, -97032, -78660, -78659).
+# The --with blank-imports http2, a package Caddy already links. Once the builder's Caddy requires this x/net or newer,
+# delete the ARG and the --with: a newer requirement makes xcaddy's go get fail rather than downgrade Caddy.
+# renovate: datasource=go depName=golang.org/x/net
+ARG X_NET_VERSION=v0.60.0
 # XCADDY_SKIP_CLEANUP keeps the generated build module so its dependency graph can be walked
 # after the build: xcaddy builds outside any module of ours, and the license tree has to
 # come from the module set that actually went into /usr/bin/caddy.
@@ -17,6 +22,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     XCADDY_SKIP_CLEANUP=1 xcaddy build \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
         --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.14.1 \
+        --with "golang.org/x/net/http2@${X_NET_VERSION}" \
     && set -- /tmp/buildenv_* && [ "$#" -eq 1 ] && [ -d "$1" ] \
     && cp /src/LICENSE /src/NOTICE "$1"/ && cp -r /src/licenses "$1"/ \
     && sh /usr/local/bin/collect-licenses.sh --src "$1" --name docker-caddy . \
