@@ -4,7 +4,7 @@ This page describes how the image is assembled and what that means for Caddy's b
 
 ## Built from the official builder
 
-The binary is compiled in the official `caddy` builder image with [xcaddy](https://github.com/caddyserver/xcaddy), the tool Caddy's maintainers provide for adding plugins. The two plugins are pinned by version in the Dockerfile. Everything else in the binary is the Caddy release the builder carries.
+The binary is compiled in the official `caddy` builder image with [xcaddy](https://github.com/caddyserver/xcaddy), the tool Caddy's maintainers provide for adding plugins. The two plugins are pinned by version in the Dockerfile. The Dockerfile also pins `golang.org/x/net` at a newer version than that Caddy release requires, so the binary gets security fixes the release does not carry yet. Everything else in the binary is the Caddy release the builder carries.
 
 The amd64 and arm64 images each compile on hardware of their own architecture, with no emulation.
 
