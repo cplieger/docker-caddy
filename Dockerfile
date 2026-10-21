@@ -65,7 +65,7 @@ RUN set -eu; \
     [ "${XDG_DATA_HOME:-}" = /data ] || { printf '%s\n' "donor XDG_DATA_HOME is ${XDG_DATA_HOME:-<unset>}; this Dockerfile clones /data" >&2; exit 1; }; \
     [ "${XDG_CONFIG_HOME:-}" = /config ] || { printf '%s\n' "donor XDG_CONFIG_HOME is ${XDG_CONFIG_HOME:-<unset>}; this Dockerfile clones /config" >&2; exit 1; }
 
-FROM gcr.io/distroless/static-debian13:latest@sha256:9e0130bec991f471279b70f1630ada11e46dad439ef2949544f96001225329fb
+FROM gcr.io/distroless/static-debian13:latest@sha256:034df5c1737e8241f6ed6423a12e720ee0f6d6f088609ee172f98f6f2166ef5d
 
 COPY --from=donor /etc/caddy /etc/caddy
 COPY --from=donor /usr/share/caddy /usr/share/caddy
