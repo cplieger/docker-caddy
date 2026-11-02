@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     XCADDY_SKIP_CLEANUP=1 xcaddy build \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
-        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.14.1 \
+        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.15.0 \
         --with "golang.org/x/net/http2@${X_NET_VERSION}" \
     && set -- /tmp/buildenv_* && [ "$#" -eq 1 ] && [ -d "$1" ] \
     && cp /src/LICENSE /src/NOTICE "$1"/ && cp -r /src/licenses "$1"/ \
