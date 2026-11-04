@@ -128,7 +128,7 @@ Caddy serves Prometheus metrics from its admin API and from the `:2020` listener
 
 ## Credits
 
-docker-caddy packages [Caddy](https://github.com/caddyserver/caddy) by [@mholt](https://github.com/mholt) and the Caddy community, and all credit for the server goes to them. It is built with [xcaddy](https://github.com/caddyserver/xcaddy) from the [official Caddy image](https://hub.docker.com/_/caddy), which also supplies the default Caddyfile, welcome page and state folders. The plugins are [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare) and [caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer) by [@hslatman](https://github.com/hslatman). The healthcheck binary comes from [health](https://github.com/cplieger/health), by the same author as this image.
+docker-caddy packages [Caddy](https://github.com/caddyserver/caddy) by [@mholt](https://github.com/mholt) and the Caddy community, and all credit for the server goes to them. It is built with [xcaddy](https://github.com/caddyserver/xcaddy) from the [official Caddy image](https://hub.docker.com/_/caddy), which also supplies the default Caddyfile, welcome page and state folders. The plugins are [caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare) and [caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer) by [@hslatman](https://github.com/hslatman). The healthcheck binary comes from [health](https://github.com/cplieger/go/tree/main/health), by the same author as this image.
 
 ## Contributing
 

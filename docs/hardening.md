@@ -31,7 +31,7 @@ Two CVEs in indirect Go modules still show up in scans, `CVE-2026-44982` in Crow
 | distroless/static, the runtime base | [gcr.io/distroless](https://github.com/GoogleContainerTools/distroless) |
 | caddy-dns/cloudflare | [GitHub](https://github.com/caddy-dns/cloudflare) |
 | caddy-crowdsec-bouncer | [GitHub](https://github.com/hslatman/caddy-crowdsec-bouncer) |
-| health, the probe binary | [GitHub](https://github.com/cplieger/health) |
+| health, the probe binary | [GitHub](https://github.com/cplieger/go/tree/main/health) |
 
 The license text of every bundled component is in the image under `/usr/share/licenses/`.
 
