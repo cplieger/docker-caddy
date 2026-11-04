@@ -38,18 +38,18 @@ RUN sh /tmp/tests/smoke.sh
 
 # Asserts the freshly built probe runs on this arch and exits 1 for an unreachable URL: non-zero is what the HEALTHCHECK below rests on, and 1 rather than the 2 Docker's contract reserves.
 FROM base AS probe-builder
-# renovate: datasource=go depName=github.com/cplieger/health/probe
-ARG HEALTH_PROBE_VERSION=v1.1.0
+# renovate: datasource=go depName=github.com/cplieger/go/health
+ARG HEALTH_PROBE_VERSION=v1.0.0-dev.1
 COPY LICENSE NOTICE /src/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
 WORKDIR /src
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
+    CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/go/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
     && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; } \
     && go mod init docker-caddy >/dev/null 2>&1 \
-    && GOFLAGS=-mod=mod go get "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
-    && sh /usr/local/bin/collect-licenses.sh --name docker-caddy github.com/cplieger/health/probe/cmd/probe
+    && GOFLAGS=-mod=mod go get "github.com/cplieger/go/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
+    && sh /usr/local/bin/collect-licenses.sh --name docker-caddy github.com/cplieger/go/health/probe/cmd/probe
 
 FROM caddy:2.11@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e AS donor
 

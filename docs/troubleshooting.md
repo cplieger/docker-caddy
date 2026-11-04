@@ -4,7 +4,7 @@ This page covers what the built-in healthcheck proves, how to make it check your
 
 ## What the healthcheck checks
 
-The image ships a liveness check. Every 30 seconds the bundled `/probe` binary from [cplieger/health](https://github.com/cplieger/health) sends a GET to Caddy's admin API at `http://127.0.0.1:2019/config/`, which is on by default. The runtime has no shell or `wget`, so `/probe` is the only HTTP client in it. The check needs no route of its own, but it requires the admin API at `127.0.0.1:2019`.
+The image ships a liveness check. Every 30 seconds the bundled `/probe` binary from [health](https://github.com/cplieger/go/tree/main/health) sends a GET to Caddy's admin API at `http://127.0.0.1:2019/config/`, which is on by default. The runtime has no shell or `wget`, so `/probe` is the only HTTP client in it. The check needs no route of its own, but it requires the admin API at `127.0.0.1:2019`.
 
 A healthy result means Caddy is up and its admin API answers. It catches faults such as a hung reload, where Caddy keeps serving traffic while the admin API is dead. It does not confirm that a config is loaded. `GET /config/` answers 200 with a body of `null` once the config has been stopped or deleted, and the probe reads only the status. Under the image's own command, a config that fails to load ends the process, so reaching that state takes a command override or a `DELETE /config/`. The `caddy_config_last_reload_successful` metric, which the shipped `CaddyConfigReloadFailed` rule reads, covers it.
 
@@ -28,7 +28,7 @@ healthcheck:
   test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
 ```
 
-The probe exits with zero only when every URL answers with a 2xx status, and with a non-zero status otherwise, which is all Docker's health state tells apart. A failure is written to standard error and shows up in `docker inspect --format '{{json .State.Health}}' caddy`. The exit codes and the error messages belong to [cplieger/health](https://github.com/cplieger/health), not to this image. You can override the timing in your compose file for faster detection with either probe.
+The probe exits with zero only when every URL answers with a 2xx status, and with a non-zero status otherwise, which is all Docker's health state tells apart. A failure is written to standard error and shows up in `docker inspect --format '{{json .State.Health}}' caddy`. The exit codes and the error messages belong to [health](https://github.com/cplieger/go/tree/main/health), not to this image. You can override the timing in your compose file for faster detection with either probe.
 
 ## Quieter admin logs
 
