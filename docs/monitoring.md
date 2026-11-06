@@ -9,7 +9,7 @@ Caddy reports through its own metrics and its own JSON log, and this repository 
 | Prometheus, Mimir or VictoriaMetrics, with Alertmanager | The six metric rules, `CaddyTargetDown` and `CaddyTargetAbsent` among them for a Caddy your scrape cannot reach | A scrape of Caddy's metrics, `alerts/promql.yaml` with your scrape job in the reachability pair, and the Caddyfile options below |
 | The same with Loki, as the monitoring guide's full stack runs | All eleven rules | Both files, and the handling in [Rules that report the same fault](#rules-that-report-the-same-fault) |
 | Loki and Alertmanager, no metric store | The five log rules, and no rule for a Caddy that stopped and stayed stopped | `alerts/logql.yaml`, a collector that sets `container`, and an outside probe of your site |
-| Grafana-managed alerting only | The eleven rules, imported into Grafana | A scrape of Caddy's metrics and a log source, the rules re-created in Grafana, and the pairs handled as on the row with Loki |
+| Grafana-managed alerting only | The eleven rules, imported into Grafana | A scrape of Caddy's metrics and a log source, the rules re-created in Grafana, and the pairs handled as in [Rules that report the same fault](#rules-that-report-the-same-fault): drop `CaddyCrowdSecLAPIPollFailed`, and mute the reload pair with a Grafana inhibition rule (Grafana 13 or later, through its API) or accept two notifications |
 | Docker or Unraid only | Docker health and the restart policy, and no alert | An uptime prober on your site, or something that watches Docker health |
 
 ## What Caddy emits
@@ -57,7 +57,7 @@ inhibit_rules:
       - alertname="CaddyReloadRejected"
 ```
 
-The log rule usually fires first, because `CaddyConfigReloadFailed` waits one minute and a scrape. Its first notification can still go out, and the inhibition stops it repeating. To hold that first one back too, give `CaddyReloadRejected` its own route with a `group_wait` longer than one minute plus your scrape and rule evaluation intervals.
+The log rule usually fires first, because `CaddyConfigReloadFailed` waits one minute and a scrape. Its first notification can still go out, and the inhibition stops it repeating.
 
 Both rulers must send to the same Alertmanager, and to the same tenant where it has tenants, such as Mimir's. The log rule carries your collector's `container` label and the metric rule carries your scrape's `job` and `instance`, so the two share no label to list under `equal`. With no `equal`, a failed apply on one Caddy mutes a rejected reload on every Caddy, which is right when you run one. With several, give both alerts a label that names the host, through your scrape config and your log collector, and list it under `equal`.
 
