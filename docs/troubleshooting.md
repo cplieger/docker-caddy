@@ -14,18 +14,18 @@ A Caddyfile that sets `admin off` or moves the admin address makes this probe fa
 
 ## Check the serving path too
 
-To check that the proxy really serves traffic, with its listener bound and routing working, override the healthcheck to probe a `/health` route. Both example Caddyfiles serve one on plain HTTP port 80. It has to live in an explicit `http://:80` block, because Caddy redirects port 80 to 443 for HTTPS site blocks, and a `/health` route inside one would answer 308 instead of serving over plain HTTP. Then override the healthcheck in your compose file:
+To check that the proxy really serves traffic, with its listener bound and routing working, override the healthcheck to probe a `/healthz` route. Both example Caddyfiles serve one on plain HTTP port 80. It has to live in an explicit `http://:80` block, because Caddy redirects port 80 to 443 for HTTPS site blocks, and a `/healthz` route inside one would answer 308 instead of serving over plain HTTP. Then override the healthcheck in your compose file:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health"]
+  test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/healthz"]
 ```
 
 The probe accepts several URLs, and every one must answer with a 2xx status within the shared `-timeout` budget. Keep `-timeout` at 4s as shown, below Docker's 5s healthcheck timeout, so a slow endpoint is reported instead of killed. One healthcheck can then watch the serving path and the admin API:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/health", "http://127.0.0.1:2019/config/"]
+  test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/healthz", "http://127.0.0.1:2019/config/"]
 ```
 
 The probe exits with zero only when every URL answers with a 2xx status, and with a non-zero status otherwise, which is all Docker's health state tells apart. A failure is written to standard error and shows up in `docker inspect --format '{{json .State.Health}}' caddy`. The exit codes and the error messages belong to [health](https://github.com/cplieger/go/tree/main/health), not to this image. You can override the timing in your compose file for faster detection with either probe.

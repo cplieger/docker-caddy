@@ -224,8 +224,8 @@ if ! (
   fi
 
   if start_route_config "$example"; then
-    assert_route_status http://127.0.0.1:80/health 200
-    assert_route_body http://127.0.0.1:80/health OK
+    assert_route_status http://127.0.0.1:80/healthz 200
+    assert_route_body http://127.0.0.1:80/healthz OK
     stop_route_config
   fi
 
@@ -238,8 +238,8 @@ if ! (
     err "FAIL: could not extract the http://:80 block from the plugins example (vacuous control?)"
     route_fail=1
   elif start_route_config "$plugins_health"; then
-    assert_route_status http://127.0.0.1:80/health 200
-    assert_route_body http://127.0.0.1:80/health OK
+    assert_route_status http://127.0.0.1:80/healthz 200
+    assert_route_body http://127.0.0.1:80/healthz OK
     stop_route_config
   fi
 
@@ -263,8 +263,8 @@ if ! (
       err "FAIL: the :80 health block swallowed the automatic redirect with no managed certificate: got $unmanaged_got, want 308 https://foo.example.com/"
       route_fail=1
     fi
-    assert_route_status http://127.0.0.1:80/health 200
-    assert_route_body http://127.0.0.1:80/health OK
+    assert_route_status http://127.0.0.1:80/healthz 200
+    assert_route_body http://127.0.0.1:80/healthz OK
     stop_route_config
   fi
 
@@ -282,8 +282,8 @@ if ! (
       err "FAIL: the plugins example :80 health block swallowed the automatic redirect with no managed certificate: got $plugins_unmanaged_got, want 308 https://foo.example.com/"
       route_fail=1
     fi
-    assert_route_status http://127.0.0.1:80/health 200
-    assert_route_body http://127.0.0.1:80/health OK
+    assert_route_status http://127.0.0.1:80/healthz 200
+    assert_route_body http://127.0.0.1:80/healthz OK
     stop_route_config
   fi
 
