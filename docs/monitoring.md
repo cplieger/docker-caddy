@@ -7,8 +7,9 @@ Caddy reports through its own metrics and its own JSON log, and this repository 
 | You run | You get | You set up |
 | --- | --- | --- |
 | Prometheus, Mimir or VictoriaMetrics, with Alertmanager | The six metric rules, `CaddyTargetDown` and `CaddyTargetAbsent` among them for a Caddy your scrape cannot reach | A scrape of Caddy's metrics, `alerts/promql.yaml` with your scrape job in the reachability pair, and the Caddyfile options below |
-| The same with Loki, as the monitoring guide's starting stack runs | All eleven rules | Both files, and the handling in [Rules that report the same fault](#rules-that-report-the-same-fault) |
+| The same with Loki, as the monitoring guide's full stack runs | All eleven rules | Both files, and the handling in [Rules that report the same fault](#rules-that-report-the-same-fault) |
 | Loki and Alertmanager, no metric store | The five log rules, and no rule for a Caddy that stopped and stayed stopped | `alerts/logql.yaml`, a collector that sets `container`, and an outside probe of your site |
+| Grafana-managed alerting only | The eleven rules, imported into Grafana | A scrape of Caddy's metrics and a log source, the rules re-created in Grafana, and the pairs handled as on the row with Loki |
 | Docker or Unraid only | Docker health and the restart policy, and no alert | An uptime prober on your site, or something that watches Docker health |
 
 ## What Caddy emits
@@ -46,7 +47,7 @@ With both files loaded, two pairs of rules can report one fault twice.
 - With `enable_caddy_metrics` on, a LAPI outage fires `CaddyCrowdSecLAPIFailing` and `CaddyCrowdSecLAPIPollFailed`. Drop `CaddyCrowdSecLAPIPollFailed` from your copy of `alerts/logql.yaml`, because the metric rule reports the same outage. Keep it where the metrics are off or `disable_streaming` is set, because it is then the only rule that sees the outage.
 - A SIGUSR1 reload of a config that fails to apply fires `CaddyReloadRejected` and `CaddyConfigReloadFailed`. Keep both, because `CaddyReloadRejected` is the only signal for a file that fails to read or adapt. Have your Alertmanager mute `CaddyReloadRejected` while `CaddyConfigReloadFailed` fires.
 
-This inhibition goes in your Alertmanager config. It needs Alertmanager v0.34.1 or later, which fixed inhibitions that un-muted their targets.
+This inhibition goes in your Alertmanager config. Use Alertmanager v0.34.1 or later, because earlier releases could un-mute an inhibited alert in some cases.
 
 ```yaml
 inhibit_rules:
@@ -56,7 +57,9 @@ inhibit_rules:
       - alertname="CaddyReloadRejected"
 ```
 
-Both rulers must send to the same Alertmanager. The log rule carries your collector's `container` label and the metric rule carries your scrape's `job` and `instance`, so the two share no label to list under `equal`. With no `equal`, a failed apply on one Caddy mutes a rejected reload on every Caddy, which is right when you run one. With several, give both alerts a label that names the host, through your scrape config and your log collector, and list it under `equal`.
+The log rule usually fires first, because `CaddyConfigReloadFailed` waits one minute and a scrape. Its first notification can still go out, and the inhibition stops it repeating. To hold that first one back too, give `CaddyReloadRejected` its own route with a `group_wait` longer than one minute plus your scrape and rule evaluation intervals.
+
+Both rulers must send to the same Alertmanager, and to the same tenant where it has tenants, such as Mimir's. The log rule carries your collector's `container` label and the metric rule carries your scrape's `job` and `instance`, so the two share no label to list under `equal`. With no `equal`, a failed apply on one Caddy mutes a rejected reload on every Caddy, which is right when you run one. With several, give both alerts a label that names the host, through your scrape config and your log collector, and list it under `equal`.
 
 ### What the PromQL rules need
 
@@ -195,8 +198,8 @@ A Caddy that exits stops the container, and the restart policy reacts, not the h
 | You run | Caddy stopped | Caddy runs but a site fails |
 | --- | --- | --- |
 | Prometheus with these rules | `CaddyTargetDown`, or `CaddyTargetAbsent` once the target is gone | `CaddyHigh5xxRate` and `CaddyUpstreamUnhealthy`, for the faults they see, and an outside probe |
-| Loki only | `CaddyStartupFailed`, for a config that fails to load. Nothing for one that fails to read or adapt, or for a container that stays stopped | An outside probe |
-| Docker or Unraid only | An uptime prober on your site, or something that watches Docker health | An uptime prober on your site |
+| Loki only | `CaddyStartupFailed`, for a config that fails to load, and nothing for one that fails to read or adapt. An outside probe, for a container that stays stopped | An outside probe |
+| Docker or Unraid only | The restart policy, which restarts it and tells nobody, and an uptime prober on your site | An uptime prober on your site |
 
 **Probing from outside.** A probe of the serving path is the one signal every stack has for a Caddy that stopped and stayed stopped. Check a site Caddy serves, with the scheme and name your users open, and pass on status 200 only, without matching the body. Use a 5-second timeout, check every 60 seconds, alert after 3 failures, and wait 15 seconds after a first start. For a fixed route to probe, add `respond /healthz "OK" 200` in an explicit `http://:80` block, as both example Caddyfiles do and [Check the serving path too](troubleshooting.md#check-the-serving-path-too) explains.
 
