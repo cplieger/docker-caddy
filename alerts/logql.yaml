@@ -5,7 +5,8 @@
 # container selector to the label your log collector sets.
 # Some records these rules read can carry a live Cloudflare API token.
 # docs/monitoring.md names them and states what each rule needs.
-# The sibling alerts/promql.yaml is for a Prometheus or Mimir ruler.
+# Complementary to alerts/promql.yaml, for a Prometheus or Mimir ruler: these
+# rules cover conditions with no reliable series. Load both.
 groups:
   - name: caddy
     rules:

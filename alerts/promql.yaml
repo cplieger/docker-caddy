@@ -5,7 +5,8 @@
 # job label is left out of the selectors that read Caddy's own metrics. The
 # reachability pair reads the synthetic up series and needs it.
 # docs/monitoring.md states what each rule needs.
-# The sibling alerts/logql.yaml is for Loki's ruler.
+# Complementary to alerts/logql.yaml, which is for Loki's ruler: load both.
+# docs/monitoring.md names the alerts that overlap when Caddy's metrics are on.
 groups:
   - name: caddy
     rules:
