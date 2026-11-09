@@ -9,7 +9,7 @@ FROM base AS builder
 COPY LICENSE NOTICE /src/
 COPY licenses/ /src/licenses/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
-# Raises x/net above the v0.59.0 the builder's Caddy v2.11.7 requires (CVE-2026-78669, -78663, -97032, -78660, -78659).
+# Raises x/net above the version the builder's Caddy requires (CVE-2026-78669, -78663, -97032, -78660, -78659).
 # The --with blank-imports http2, a package Caddy already links. Once the builder's Caddy requires this x/net or newer,
 # delete the ARG and the --with: a newer requirement makes xcaddy's go get fail rather than downgrade Caddy.
 # renovate: datasource=go depName=golang.org/x/net
