@@ -21,12 +21,24 @@ example="$d/Caddyfile.example"
 alerts="$d/alerts"
 [ -d "$alerts" ] || alerts="$d/../alerts"
 
+# Prints every rule file under $1. The promtool fixtures (*_test.yaml) sit beside
+# the rules and name the same metrics in their input series, so reading them
+# would satisfy every selector check below whatever the rules read.
+cat_rules() {
+  for rule_file in "$1"/*.yaml; do
+    case $rule_file in
+      *_test.yaml) ;;
+      *) if [ -f "$rule_file" ]; then cat "$rule_file"; fi ;;
+    esac
+  done
+}
+
 # CaddyStartupFailed's selector is read out of the bundle and run against the
 # binary, so the rule and the output it must match cannot drift apart. grep -E
 # stands in for Loki's RE2 only while the pattern uses syntax both agree on.
 # The backticks are LogQL's raw-string quotes, not a shell expansion.
 # shellcheck disable=SC2016
-startup_re=$(cat "$alerts"/*.yaml 2>/dev/null \
+startup_re=$(cat_rules "$alerts" 2>/dev/null \
   | awk '/^      - alert: CaddyStartupFailed$/ { r = 1 } r && /^        for:/ { exit } r { print }' \
   | sed -n 's/^.*|~ `\(.*\)`.*$/\1/p')
 if [ -z "$startup_re" ]; then
@@ -321,7 +333,7 @@ if ! (
   signal_metrics="$signal_dir/metrics"
   # Same idiom as $example above: the build copies the bundle beside this script,
   # a local run reads the committed copy. The bundle is a FOLDER, one file per
-  # expression language, and the assertions below read every file in it rather
+  # expression language, and the assertions below read every rule file in it rather
   # than one filename: a rule moving between promql.yaml and logql.yaml must not
   # change which tokens the bundle selects, and a third language file later is
   # covered with no edit here.
@@ -329,7 +341,7 @@ if ! (
   signal_bundle="$d/alerts"
   [ -d "$signal_bundle" ] || signal_bundle="$d/../alerts"
   signal_alerts="$signal_dir/alerts-bundle.yaml"
-  cat "$signal_bundle"/*.yaml >"$signal_alerts" 2>/dev/null || true
+  cat_rules "$signal_bundle" >"$signal_alerts" 2>/dev/null || true
   if [ ! -s "$signal_alerts" ]; then
     err "FAIL: no alert rule files under $signal_bundle"
     signal_fail=1
@@ -622,7 +634,7 @@ if ! (
   dockerfile="$d/Dockerfile"
   [ -f "$dockerfile" ] || dockerfile="$d/../Dockerfile"
 
-  admin_rule=$(cat "$alerts"/*.yaml 2>/dev/null \
+  admin_rule=$(cat_rules "$alerts" 2>/dev/null \
     | awk '/^      - alert: CaddyAdminAPIStalled$/ { r = 1 } r && /^        for:/ { exit } r { print }')
   admin_path=$(printf '%s\n' "$admin_rule" \
     | sed -n 's/.*increase(caddy_admin_http_requests_total{path="\([^"]*\)"}\[[0-9]*m\]).*/\1/p')
