@@ -33,6 +33,7 @@ COPY tests/ /tmp/tests/
 COPY Caddyfile.example /tmp/tests/Caddyfile.example
 COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
 COPY alerts/ /tmp/tests/alerts/
+COPY docs/monitoring.md /tmp/tests/docs/monitoring.md
 COPY compose.yaml /tmp/tests/compose.yaml
 COPY Dockerfile /tmp/tests/Dockerfile
 RUN sh /tmp/tests/smoke.sh

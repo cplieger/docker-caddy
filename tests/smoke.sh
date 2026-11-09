@@ -769,5 +769,32 @@ if ! (
   fail=1
 fi
 
+# The admin-stall passage of docs/monitoring.md quotes the lines that start and end
+# each reload. Every backticked span in it must be a string in this binary, so a
+# Caddy bump that rewords one fails here instead of misleading a reader. The
+# backticks are Markdown's code quotes, not a shell expansion.
+monitoring="$d/docs/monitoring.md"
+[ -f "$monitoring" ] || monitoring="$d/../docs/monitoring.md"
+# shellcheck disable=SC2016
+reload_spans=$(awk '/^When it fires, find the / { r = 1 } r && /^Check the stuck reload/ { exit } r { print }' \
+  "$monitoring" 2>/dev/null | grep -o '`[^`]*`' | sed 's/^`//; s/`$//')
+caddy_path=$(command -v "$caddy" || true)
+if [ -z "$reload_spans" ]; then
+  err "FAIL: could not read the reload log lines from $monitoring (Admin API stall passage renamed or reshaped?)"
+  fail=1
+elif [ ! -f "$caddy_path" ]; then
+  err "FAIL: could not resolve the caddy binary '$caddy' to a file"
+  fail=1
+else
+  missing_spans=$(printf '%s\n' "$reload_spans" | while IFS= read -r span; do
+    grep -qF -e "$span" "$caddy_path" || printf '%s\n' "$span"
+  done)
+  if [ -n "$missing_spans" ]; then
+    err "FAIL: docs/monitoring.md quotes reload log text that $caddy_path does not contain:"
+    printf '%s\n' "$missing_spans" >&2
+    fail=1
+  fi
+fi
+
 [ "$fail" -eq 0 ] && log "caddy smoke: ok"
 exit "$fail"
