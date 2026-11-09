@@ -27,10 +27,10 @@ The probe accepts several URLs, and every one must answer with a 2xx status with
 
 ```yaml
 healthcheck:
-  test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:80/healthz", "http://127.0.0.1:2019/config/"]
+  test: ["CMD", "/probe", "-timeout", "4s", "http://127.0.0.1:2019/config/", "http://127.0.0.1:80/healthz"]
 ```
 
-Keep the admin URL in the list, as in this second form, if you load `CaddyAdminAPIStalled`. The rule counts the probe's requests to `/config/`, and the first form sends none.
+Keep the admin URL in the list, and first, if you load `CaddyAdminAPIStalled`. The rule counts the probe's requests to `/config/`, and the first form sends none. The URLs share one timeout budget, so a URL that hangs spends it and the probe never sends the ones after it.
 
 The probe exits with zero only when every URL answers with a 2xx status, and with a non-zero status otherwise, which is all Docker's health state tells apart. A failure is written to standard error and shows up in `docker inspect --format '{{json .State.Health}}' caddy`. The exit codes and the error messages belong to [health](https://github.com/cplieger/go/tree/main/health), not to this image. You can override the timing in your compose file for faster detection with either probe.
 
