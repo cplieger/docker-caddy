@@ -155,7 +155,13 @@ The rule stays silent in three cases. Caddy creates the counter at its first ans
 
 It depends on the healthcheck's traffic. With `admin off`, another admin address, a runtime that ignores the image's healthcheck, or an override that drops the `/config/` URL, nothing reads `/config/` and the rule stays silent. A request you then send to `/config/` by hand creates the series, and the rule fires 5 minutes later and keeps firing until Caddy restarts. Delete the rule from your copy on such a deployment, or keep the admin URL in your healthcheck as [Check the serving path too](troubleshooting.md#check-the-serving-path-too) shows.
 
-When it fires, find the last reload in the container log. A `POST /load` request on the `admin.api` logger, or `reloading config from last-known source` for a SIGUSR1, with no `load complete` or error record after it, is the reload that holds the lock. Check that config for a module that blocks while it provisions. Restarting the container ends the hang and loads the config file again.
+When it fires, find the last reload in the container log, because that reload holds the lock. Each reload path logs its end differently.
+
+- A `POST /load` request on the `admin.api` logger, which `caddy reload` also sends, is stuck when no `load complete` follows it. A `request error` record after it means the reload ended in a rejection.
+- A SIGUSR1 reload is stuck when `reloading config from last-known source` has no later `successfully reloaded config from file` or `failed to reload config from file`.
+- An opted-in `--watch` logs `config file changed; reloading` and nothing more on success. While the alert fires, the last such line with no `applying latest config` error after it is the stuck reload.
+
+Check that config for a module that blocks while it provisions. Restarting the container ends the hang and loads the config file again.
 
 ### The 5xx rate
 
