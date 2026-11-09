@@ -1,0 +1,104 @@
+# promtool test rules alerts/promql_test.yaml
+rule_files:
+  - promql.yaml
+
+evaluation_interval: 30s
+
+tests:
+  - name: CaddyAdminAPIStalled stays quiet while the healthcheck probe answers every 30s
+    interval: 30s
+    input_series:
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "1+1x40"
+      # One old failed probe: a flat series of its own that the sum over code absorbs.
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/config/", code="400", method="GET"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+
+  - name: CaddyAdminAPIStalled fires once the counter has been flat for the whole window
+    interval: 1m
+    input_series:
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "0+2x10 20x10"
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/metrics", code="200", method="GET"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 13m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: caddy
+              instance: caddy:2020
+              handler: admin
+              path: /config/
+            exp_annotations:
+              summary: "Caddy's admin API is stalled, so reloads no longer apply"
+              description: "No admin API request to /config/ has completed for 5 minutes, so config reads and reloads stop applying while sites keep serving. The image's default healthcheck sends that request. Check the container log for the reload holding the lock.\n"
+
+  - name: CaddyAdminAPIStalled stays quiet when the /config/ series never existed
+    interval: 1m
+    input_series:
+      # admin off, a disabled healthcheck or a probe that never reached Caddy: other
+      # admin routes may still have series, flat or not.
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/load", code="200", method="POST"}'
+        values: "1x20"
+      - series: 'caddy_config_last_reload_successful{job="caddy", instance="caddy:2020"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+
+  - name: CaddyAdminAPIStalled stays quiet across a restart that resets the counter
+    interval: 1m
+    input_series:
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "100+2x10 0+2x10"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+
+  - name: CaddyAdminAPIStalled stays quiet while the scrape is down
+    interval: 1m
+    input_series:
+      # Healthy until the scrape fails at 10m: Prometheus marks the series stale.
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="a:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "0+2x9 stale _x10"
+      - series: 'up{job="caddy", instance="a:2020"}'
+        values: "1x9 0x11"
+      # Flat from 10m, then the whole process wedges and the scrape fails at 13m.
+      # The flat samples left in the window would fire the rule on their own.
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="b:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "0+2x10 20x1 stale _x8"
+      - series: 'up{job="caddy", instance="b:2020"}'
+        values: "1x12 0x8"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []

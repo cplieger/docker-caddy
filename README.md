@@ -115,7 +115,7 @@ When Caddy cannot start, the container exits with status 1 and `restart: unless-
 
 ## Monitoring
 
-Caddy serves Prometheus metrics from its admin API and from the `:2020` listener in `Caddyfile.plugins.example`, and writes JSON logs. Six PromQL rules ship in [`alerts/promql.yaml`](alerts/promql.yaml) and five LogQL rules in [`alerts/logql.yaml`](alerts/logql.yaml). Load both, because the log rules cover failures Caddy's metrics cannot see. [Monitoring and alerts](docs/monitoring.md) lists them, says what each one needs, shows how to load each file into its own ruler and names the pairs that report one fault twice.
+Caddy serves Prometheus metrics from its admin API and from the `:2020` listener in `Caddyfile.plugins.example`, and writes JSON logs. Seven PromQL rules ship in [`alerts/promql.yaml`](alerts/promql.yaml) and five LogQL rules in [`alerts/logql.yaml`](alerts/logql.yaml). Load both, because the log rules cover failures Caddy's metrics cannot see. [Monitoring and alerts](docs/monitoring.md) lists them, says what each one needs, shows how to load each file into its own ruler and names the pairs that report one fault twice.
 
 ## Documentation
 

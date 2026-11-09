@@ -34,6 +34,7 @@ COPY Caddyfile.example /tmp/tests/Caddyfile.example
 COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
 COPY alerts/ /tmp/tests/alerts/
 COPY compose.yaml /tmp/tests/compose.yaml
+COPY Dockerfile /tmp/tests/Dockerfile
 RUN sh /tmp/tests/smoke.sh
 
 # Asserts the freshly built probe runs on this arch and exits 1 for an unreachable URL: non-zero is what the HEALTHCHECK below rests on, and 1 rather than the 2 Docker's contract reserves.

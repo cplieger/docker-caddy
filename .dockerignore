@@ -6,6 +6,7 @@
 !Caddyfile.plugins.example
 !alerts/
 !compose.yaml
+!Dockerfile
 !tests/
 !LICENSE
 !NOTICE
