@@ -627,6 +627,9 @@ emit_stall_config() {
     "  tls $1 /nonexistent/key.pem" '}'
 }
 
+monitoring="$d/docs/monitoring.md"
+[ -f "$monitoring" ] || monitoring="$d/../docs/monitoring.md"
+
 if ! (
   admin_dir=$(mktemp -d)
   trap 'rm -rf "$admin_dir"' EXIT
@@ -644,6 +647,11 @@ if ! (
   hc_cmd=$(awk '/^HEALTHCHECK / { h = 1 } h && /CMD \[/ { print; exit }' "$dockerfile")
   hc_url=$(printf '%s\n' "$hc_cmd" | sed -n 's/.*"\(http:[^"]*\)"\].*/\1/p')
   hc_timeout=$(printf '%s\n' "$hc_cmd" | sed -n 's/.*"-timeout", "\([0-9]*\)s".*/\1/p')
+  admin_dump_path=$(sed -n "s|.*localhost:2019\(/debug/pprof/[^']*\)'.*|\1|p" "$monitoring" 2>/dev/null)
+  if [ -z "$admin_dump_path" ]; then
+    err "FAIL: could not read the goroutine dump command from $monitoring (Admin API stall passage renamed or reshaped?)"
+    exit 1
+  fi
   if [ -z "$admin_path" ] || [ -z "$admin_window" ]; then
     err "FAIL: could not read the CaddyAdminAPIStalled path and window from $alerts (renamed or reshaped?)"
     exit 1
@@ -776,7 +784,7 @@ if ! (
   admin_i=0
   while [ "$admin_i" -lt 5 ] && [ "$admin_holder" != '2 1 1' ]; do
     sleep 1
-    if admin_dump=$(curl -fsS --max-time 5 "$admin_base/debug/pprof/goroutine?debug=2"); then
+    if admin_dump=$(curl -fsS --max-time 5 "$admin_base$admin_dump_path"); then
       admin_holder=$(printf '%s\n' "$admin_dump" | admin_holders)
     else
       admin_holder=unanswered
@@ -815,13 +823,10 @@ if ! (
   fail=1
 fi
 
-# The admin-stall passage of docs/monitoring.md quotes the goroutine-dump frames
-# that name the reload holding the lock. Every backticked span in it must be a
-# string in this binary, so a Caddy bump that renames one fails here instead of
-# misleading a reader. The backticks are Markdown's code quotes, not a shell
-# expansion.
-monitoring="$d/docs/monitoring.md"
-[ -f "$monitoring" ] || monitoring="$d/../docs/monitoring.md"
+# The admin-stall passage of docs/monitoring.md quotes goroutine-dump frames.
+# Every backticked span in its frame paragraphs must be a string in this binary,
+# so a Caddy bump that renames one fails here instead of misleading a reader.
+# The backticks are Markdown's code quotes, not a shell expansion.
 # shellcheck disable=SC2016
 reload_spans=$(awk '/^Every reload, and every config change / { r = 1 } r && /^The container log.s reload lines/ { exit } r { print }' \
   "$monitoring" 2>/dev/null | grep -o '`[^`]*`' | sed 's/^`//; s/`$//')

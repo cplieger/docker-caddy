@@ -43,7 +43,7 @@ tests:
               path: /config/
             exp_annotations:
               summary: "Caddy's admin API is stalled, so reloads no longer apply"
-              description: "No admin API request to /config/ has completed for 5 minutes, so config reads and reloads stop applying while sites keep serving. The image's default healthcheck sends that request. Check the container log for the reload holding the lock.\n"
+              description: "No admin API request to /config/ has completed for 5 minutes, so config reads and reloads stop applying while sites keep serving. The image's default healthcheck sends that request. Read the admin API goroutine dump for the reload holding the lock, as the Admin API stall section of docs/monitoring.md shows.\n"
 
   - name: CaddyAdminAPIStalled stays quiet when the /config/ series never existed
     interval: 1m

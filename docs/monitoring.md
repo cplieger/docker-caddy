@@ -155,7 +155,7 @@ The rule stays silent in three cases. Caddy creates the counter at its first ans
 
 It depends on the healthcheck's traffic. With `admin off`, another admin address, a runtime that ignores the image's healthcheck, or an override that drops the `/config/` URL, nothing reads `/config/` and the rule stays silent. A request you then send to `/config/` by hand creates the series, and the rule fires 5 minutes later and keeps firing until Caddy restarts. Delete the rule from your copy on such a deployment, or keep the admin URL in your healthcheck as [Check the serving path too](troubleshooting.md#check-the-serving-path-too) shows.
 
-When it fires, ask Caddy which reload holds the lock. The admin API serves a goroutine dump that, like `/metrics`, takes no lock, so it answers during the stall. The container has no shell or `curl`, so run one in its network namespace:
+When it fires, ask Caddy which reload holds the lock. The admin API serves a [goroutine dump](https://caddyserver.com/docs/profiling), which lists every running goroutine's call stack, one frame per function call. Like `/metrics`, it takes no lock, so it answers during the stall. The container has no shell or `curl`, so run one in its network namespace:
 
 ```sh
 docker run --rm --network container:caddy curlimages/curl -s 'http://localhost:2019/debug/pprof/goroutine?debug=2'
@@ -168,10 +168,11 @@ Its frames above `changeConfig` show what it waits on. A stuck provisioning pass
 - `github.com/caddyserver/caddy/v2/caddyconfig.adminLoad.handleLoad` for a `POST` to `/load`, which `caddy reload` sends
 - `github.com/caddyserver/caddy/v2.trapSignalsPosix` for SIGUSR1
 - `github.com/caddyserver/caddy/v2/cmd.watchConfigFile` for `--watch`
+- `github.com/caddyserver/caddy/v2.handleConfig` for a `POST`, `PUT`, `PATCH` or `DELETE` under `/config/` or `/id/`
 
 The container log's reload lines from around the time the alert started show what was being loaded.
 
-Once what the stuck frame waits on returns, for example after you restore the file or the service it reads, the reload finishes on its own and the reloads queued behind it run in turn. Restarting the container also ends the hang and loads the config file again, so take the cause out of the file first.
+Restore what the stuck reload waits on, such as the file or the service it reads. The reload then finishes on its own, and the reloads queued behind it run in turn. Restarting the container also ends the hang and loads the config file again, so take the cause out of the file first.
 
 ### The 5xx rate
 
