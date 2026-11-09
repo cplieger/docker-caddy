@@ -679,6 +679,21 @@ if ! (
   admin_probe() {
     curl -fsS -o /dev/null --max-time "$hc_timeout" "$hc_url"
   }
+  # Reads a goroutine dump (debug=2) on stdin and prints three counts: goroutines
+  # in changeConfig, those without sync.(*RWMutex).Lock just above it (the
+  # holder, by docs/monitoring.md's rule), and holders in caddytls's Provision.
+  admin_holders() {
+    awk '
+      function flush() { if (cc) { n++; if (!w) { h++; if (t) ht++ } } }
+      /^goroutine / { flush(); cc = 0; w = 0; t = 0; prev = "" }
+      index($0, "github.com/caddyserver/caddy/v2/modules/caddytls.(*TLS).Provision(") == 1 { t = 1 }
+      index($0, "github.com/caddyserver/caddy/v2.changeConfig(") == 1 {
+        cc = 1
+        if (index(prev, "sync.(*RWMutex).Lock(") == 1) w = 1
+      }
+      substr($0, 1, 1) != "\t" { prev = $0 }
+      END { flush(); print n + 0, h + 0, ht + 0 }'
+  }
 
   admin_cfg="$admin_dir/Caddyfile"
   printf '%s\n' '{' '  admin localhost:2019' '}' >"$admin_cfg"
@@ -750,9 +765,40 @@ if ! (
       admin_fail=1
     fi
   fi
+
+  # docs/monitoring.md's stall steps: the goroutine dump answers under the held
+  # lock, and of a stuck and a queued reload only the stuck one, in caddytls's
+  # Provision, lacks the lock wait.
+  timeout 30 "$caddy" reload --force --adapter caddyfile --config "$admin_cfg" \
+    >"$admin_dir/queued.log" 2>&1 &
+  admin_queued=$!
+  admin_holder=none
+  admin_i=0
+  while [ "$admin_i" -lt 5 ] && [ "$admin_holder" != '2 1 1' ]; do
+    sleep 1
+    if admin_dump=$(curl -fsS --max-time 5 "$admin_base/debug/pprof/goroutine?debug=2"); then
+      admin_holder=$(printf '%s\n' "$admin_dump" | admin_holders)
+    else
+      admin_holder=unanswered
+    fi
+    admin_i=$((admin_i + 1))
+  done
+  if [ "$admin_holder" = unanswered ]; then
+    err 'FAIL: the admin goroutine dump did not answer during a stuck reload'
+    admin_fail=1
+  elif [ "$admin_holder" != '2 1 1' ]; then
+    err "FAIL: the goroutine dump showed changeConfig goroutines, holders and holders in caddytls Provision as '$admin_holder', want '2 1 1'"
+    admin_fail=1
+  fi
+
   timeout 5 dd if=/dev/null of="$admin_fifo" 2>/dev/null || true
   if wait "$admin_reload"; then
     err 'FAIL: the reload with a FIFO certificate succeeded, so the fixture held nothing'
+    admin_fail=1
+  fi
+  if ! wait "$admin_queued"; then
+    err 'FAIL: the reload queued behind the stuck one did not succeed once it was released'
+    cat "$admin_dir/queued.log" >&2
     admin_fail=1
   fi
   if ! admin_probe; then
@@ -769,18 +815,19 @@ if ! (
   fail=1
 fi
 
-# The admin-stall passage of docs/monitoring.md quotes the lines that start and end
-# each reload. Every backticked span in it must be a string in this binary, so a
-# Caddy bump that rewords one fails here instead of misleading a reader. The
-# backticks are Markdown's code quotes, not a shell expansion.
+# The admin-stall passage of docs/monitoring.md quotes the goroutine-dump frames
+# that name the reload holding the lock. Every backticked span in it must be a
+# string in this binary, so a Caddy bump that renames one fails here instead of
+# misleading a reader. The backticks are Markdown's code quotes, not a shell
+# expansion.
 monitoring="$d/docs/monitoring.md"
 [ -f "$monitoring" ] || monitoring="$d/../docs/monitoring.md"
 # shellcheck disable=SC2016
-reload_spans=$(awk '/^When it fires, find the / { r = 1 } r && /^Check the stuck reload/ { exit } r { print }' \
+reload_spans=$(awk '/^Every reload, and every config change / { r = 1 } r && /^The container log.s reload lines/ { exit } r { print }' \
   "$monitoring" 2>/dev/null | grep -o '`[^`]*`' | sed 's/^`//; s/`$//')
 caddy_path=$(command -v "$caddy" || true)
 if [ -z "$reload_spans" ]; then
-  err "FAIL: could not read the reload log lines from $monitoring (Admin API stall passage renamed or reshaped?)"
+  err "FAIL: could not read the goroutine-dump frames from $monitoring (Admin API stall passage renamed or reshaped?)"
   fail=1
 elif [ ! -f "$caddy_path" ]; then
   err "FAIL: could not resolve the caddy binary '$caddy' to a file"
@@ -790,7 +837,7 @@ else
     grep -qF -e "$span" "$caddy_path" || printf '%s\n' "$span"
   done)
   if [ -n "$missing_spans" ]; then
-    err "FAIL: docs/monitoring.md quotes reload log text that $caddy_path does not contain:"
+    err "FAIL: docs/monitoring.md quotes goroutine-dump text that $caddy_path does not contain:"
     printf '%s\n' "$missing_spans" >&2
     fail=1
   fi

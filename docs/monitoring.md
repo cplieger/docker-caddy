@@ -155,20 +155,23 @@ The rule stays silent in three cases. Caddy creates the counter at its first ans
 
 It depends on the healthcheck's traffic. With `admin off`, another admin address, a runtime that ignores the image's healthcheck, or an override that drops the `/config/` URL, nothing reads `/config/` and the rule stays silent. A request you then send to `/config/` by hand creates the series, and the rule fires 5 minutes later and keeps firing until Caddy restarts. Delete the rule from your copy on such a deployment, or keep the admin URL in your healthcheck as [Check the serving path too](troubleshooting.md#check-the-serving-path-too) shows.
 
-When it fires, find the earliest reload in the container log that has no end line. That reload holds the lock, and every reload after it waits behind it. Each reload path logs its own start and end lines.
+When it fires, ask Caddy which reload holds the lock. The admin API serves a goroutine dump that, like `/metrics`, takes no lock, so it answers during the stall. The container has no shell or `curl`, so run one in its network namespace:
 
-- A `POST` to the admin API's `/load`, which `caddy reload` also sends, starts with a `received request` record on the `admin.api` logger whose `uri` is `/load`. It ends with `load complete`, or with `request error` when Caddy rejects the config.
-- A SIGUSR1 reload starts with `reloading config from last-known source`. It ends with `successfully reloaded config from file` or `failed to reload config from file`.
-- An opted-in `--watch` reload starts with `config file changed; reloading` on the `watcher` logger. A failed one ends with `applying latest config`.
-- A successful `--watch` reload ends with `autosaved config (load with --resume flag)`, or with `unable to autosave config` or `unable to create folder for config autosave` when the save fails. It ends with `config is unchanged` when Caddy already runs that config.
+```sh
+docker run --rm --network container:caddy curlimages/curl -s 'http://localhost:2019/debug/pprof/goroutine?debug=2'
+```
 
-Some lines need care when you pair end lines with start lines:
+Every reload, and every config change through the admin API, runs through the frame `github.com/caddyserver/caddy/v2.changeConfig`, so search the dump for it. A reload that waits for the lock shows `sync.(*RWMutex).Lock` just above that frame. The one goroutine without that wait holds the lock.
 
-- Just before its own end line, a successful `/load` or SIGUSR1 reload logs the same autosave line, and a `/load` of the config Caddy already runs logs `config is unchanged`.
-- A `request error` whose `error` field does not start with `loading config:` was refused before it reached the lock, so it ends only its own request.
-- With the `persist_config` option set to `off`, Caddy saves nothing, so a successful `--watch` reload logs no end line. Reloads take the lock one at a time, so the end line of any later reload shows it finished.
+Its frames above `changeConfig` show what it waits on. A stuck provisioning passes through a module's `Provision` frame, such as `github.com/caddyserver/caddy/v2/modules/caddytls.(*TLS).Provision` for a certificate file that never finishes reading. Its frames below `changeConfig` show what started the reload:
 
-Check the stuck reload's config for a module that blocks while it provisions. Restarting the container ends the hang and loads the config file again.
+- `github.com/caddyserver/caddy/v2/caddyconfig.adminLoad.handleLoad` for a `POST` to `/load`, which `caddy reload` sends
+- `github.com/caddyserver/caddy/v2.trapSignalsPosix` for SIGUSR1
+- `github.com/caddyserver/caddy/v2/cmd.watchConfigFile` for `--watch`
+
+The container log's reload lines from around the time the alert started show what was being loaded.
+
+Once what the stuck frame waits on returns, for example after you restore the file or the service it reads, the reload finishes on its own and the reloads queued behind it run in turn. Restarting the container also ends the hang and loads the config file again, so take the cause out of the file first.
 
 ### The 5xx rate
 
