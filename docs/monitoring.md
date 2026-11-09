@@ -155,13 +155,20 @@ The rule stays silent in three cases. Caddy creates the counter at its first ans
 
 It depends on the healthcheck's traffic. With `admin off`, another admin address, a runtime that ignores the image's healthcheck, or an override that drops the `/config/` URL, nothing reads `/config/` and the rule stays silent. A request you then send to `/config/` by hand creates the series, and the rule fires 5 minutes later and keeps firing until Caddy restarts. Delete the rule from your copy on such a deployment, or keep the admin URL in your healthcheck as [Check the serving path too](troubleshooting.md#check-the-serving-path-too) shows.
 
-When it fires, find the last reload in the container log, because that reload holds the lock. Each reload path logs its end differently.
+When it fires, find the earliest reload in the container log that has no end line. That reload holds the lock, and every reload after it waits behind it. Each reload path logs its own start and end lines.
 
-- A `POST /load` request on the `admin.api` logger, which `caddy reload` also sends, is stuck when no `load complete` follows it. A `request error` record after it means the reload ended in a rejection.
-- A SIGUSR1 reload is stuck when `reloading config from last-known source` has no later `successfully reloaded config from file` or `failed to reload config from file`.
-- An opted-in `--watch` logs `config file changed; reloading` and nothing more on success. While the alert fires, the last such line with no `applying latest config` error after it is the stuck reload.
+- A `POST` to the admin API's `/load`, which `caddy reload` also sends, starts with a `received request` record on the `admin.api` logger whose `uri` is `/load`. It ends with `load complete`, or with `request error` when Caddy rejects the config.
+- A SIGUSR1 reload starts with `reloading config from last-known source`. It ends with `successfully reloaded config from file` or `failed to reload config from file`.
+- An opted-in `--watch` reload starts with `config file changed; reloading` on the `watcher` logger. A failed one ends with `applying latest config`.
+- A successful `--watch` reload ends with `autosaved config (load with --resume flag)`, or with `unable to autosave config` or `unable to create folder for config autosave` when the save fails. It ends with `config is unchanged` when Caddy already runs that config.
 
-Check that config for a module that blocks while it provisions. Restarting the container ends the hang and loads the config file again.
+Some lines need care when you pair end lines with start lines:
+
+- Just before its own end line, a successful `/load` or SIGUSR1 reload logs the same autosave line, and a `/load` of the config Caddy already runs logs `config is unchanged`.
+- A `request error` whose `error` field does not start with `loading config:` was refused before it reached the lock, so it ends only its own request.
+- With the `persist_config` option set to `off`, Caddy saves nothing, so a successful `--watch` reload logs no end line. Reloads take the lock one at a time, so the end line of any later reload shows it finished.
+
+Check the stuck reload's config for a module that blocks while it provisions. Restarting the container ends the hang and loads the config file again.
 
 ### The 5xx rate
 
