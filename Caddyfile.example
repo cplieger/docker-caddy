@@ -6,7 +6,7 @@
 #
 # Caddyfile.plugins.example has a site block that uses the bundled plugins and
 # the two credentials it needs. docs/troubleshooting.md, "Check the serving
-# path too", shows a healthcheck override that probes the /health route below.
+# path too", shows a healthcheck override that probes the /healthz route below.
 {
 	# Deliberate: the image healthcheck probes 127.0.0.1:2019, and this
 	# directive outranks the CADDY_ADMIN env var, which only supplies the
@@ -14,8 +14,8 @@
 	admin localhost:2019
 }
 
-# /health must live in an explicit `http://:80` block. Caddy redirects port 80 to
-# 443 for HTTPS site blocks, so a /health route inside one would answer 308.
+# /healthz must live in an explicit `http://:80` block. Caddy redirects port 80 to
+# 443 for HTTPS site blocks, so a /healthz route inside one would answer 308.
 http://:80 {
-	respond /health "OK" 200
+	respond /healthz "OK" 200
 }

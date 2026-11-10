@@ -6,8 +6,8 @@ This page covers the two credentials, reloading, watch mode, the admin API and t
 
 The repository ships two example Caddyfiles. The build checks both against the shipped binary. Each adapts with no warning, and `Caddyfile.plugins.example` loads once both credentials are set.
 
-- [`Caddyfile.plugins.example`](../Caddyfile.plugins.example) uses both plugins. It carries the `crowdsec` global block, a `:2020` metrics listener, a `/health` route on plain HTTP and a wildcard site that gets its certificate through `dns cloudflare`.
-- [`Caddyfile.example`](../Caddyfile.example) is plain Caddy with a `/health` route. It uses neither plugin, so it needs neither credential.
+- [`Caddyfile.plugins.example`](../Caddyfile.plugins.example) uses both plugins. It carries the `crowdsec` global block, a `:2020` metrics listener, a `/healthz` route on plain HTTP and a wildcard site that gets its certificate through `dns cloudflare`.
+- [`Caddyfile.example`](../Caddyfile.example) is plain Caddy with a `/healthz` route. It uses neither plugin, so it needs neither credential.
 
 Copy either one to `caddy/Caddyfile` beside `compose.yaml`.
 

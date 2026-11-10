@@ -5,7 +5,8 @@
 # job label is left out of the selectors that read Caddy's own metrics. The
 # reachability pair reads the synthetic up series and needs it.
 # docs/monitoring.md states what each rule needs.
-# The sibling alerts/logql.yaml is for Loki's ruler.
+# Complementary to alerts/logql.yaml, which is for Loki's ruler: load both.
+# docs/monitoring.md names the alerts that overlap when Caddy's metrics are on.
 groups:
   - name: caddy
     rules:
@@ -84,3 +85,24 @@ groups:
             5 minutes, so it learns no new decisions and enforces at most its
             cached ones. Check the CrowdSec LAPI and the bouncer's `api_url` and
             `api_key`.
+      # Caddy counts an admin request only once its handler returns, and the
+      # image's healthcheck reads /config/ every 30 seconds, under the lock a
+      # reload holds. Five minutes spans ten probes, so a late probe or a slow
+      # scrape cannot empty the window, and the window is the only wait. A
+      # missing series never fires, and the second arm drops a series a failed
+      # scrape has marked stale, which CaddyTargetDown reports.
+      - alert: CaddyAdminAPIStalled
+        expr: >
+          sum without (code, method) (increase(caddy_admin_http_requests_total{path="/config/"}[5m])) == 0
+          and sum without (code, method) (caddy_admin_http_requests_total{path="/config/"})
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Caddy's admin API is stalled, so reloads no longer apply"
+          description: >
+            No admin API request to /config/ has completed for 5 minutes, so
+            config reads and reloads stop applying while sites keep serving. The
+            image's default healthcheck sends that request. Read the admin API
+            goroutine dump for the reload holding the lock, as the Admin API
+            stall section of docs/monitoring.md shows.

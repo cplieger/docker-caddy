@@ -104,7 +104,7 @@ The container runs as root, like the official Caddy image, so it can bind ports 
 
 ## Troubleshooting
 
-Every 30 seconds the healthcheck asks Caddy's admin API at `127.0.0.1:2019` for its config. Healthy means Caddy is running and its admin API answers. Unhealthy means the admin API stopped answering, for example during a reload that hangs. The check does not test your sites. A Caddyfile with `admin off` or another admin address makes it fail while sites still serve. [Troubleshooting](docs/troubleshooting.md) shows how to check the serving path too.
+Every 30 seconds the healthcheck asks Caddy's admin API at `127.0.0.1:2019` for its config. Healthy means Caddy runs and its admin API answers, so a hung reload turns it unhealthy. The check does not test your sites. `admin off` or another admin address makes it fail while sites still serve. [Troubleshooting](docs/troubleshooting.md) shows how to probe your sites. An unhealthy container notifies nobody. [Knowing the app is alive](docs/monitoring.md#knowing-the-app-is-alive) says what does.
 
 When Caddy cannot start, the container exits with status 1 and `restart: unless-stopped` starts it again.
 
@@ -115,14 +115,14 @@ When Caddy cannot start, the container exits with status 1 and `restart: unless-
 
 ## Monitoring
 
-Caddy serves Prometheus metrics from its admin API and from the `:2020` listener in `Caddyfile.plugins.example`, and writes JSON logs. Six PromQL rules ship in [`alerts/promql.yaml`](alerts/promql.yaml) and five LogQL rules in [`alerts/logql.yaml`](alerts/logql.yaml). [Monitoring and alerts](docs/monitoring.md) lists them, says what each one needs and shows how to load each file into its own ruler.
+Caddy serves Prometheus metrics from its admin API and from the `:2020` listener in `Caddyfile.plugins.example`, and writes JSON logs. Seven PromQL rules ship in [`alerts/promql.yaml`](alerts/promql.yaml) and five LogQL rules in [`alerts/logql.yaml`](alerts/logql.yaml). Load both, because the log rules cover failures Caddy's metrics cannot see. [Monitoring and alerts](docs/monitoring.md) lists them, says what each one needs, shows how to load each file into its own ruler and names the pairs that report one fault twice.
 
 ## Documentation
 
 - [Configuration](docs/configuration.md) covers credentials, reloads, watch mode, the admin API and the metrics listener.
 - [Plugins](docs/plugins.md) explains both plugins and how the bouncer behaves when CrowdSec is down.
 - [Troubleshooting](docs/troubleshooting.md) covers the healthcheck in depth, an end-to-end health probe and quieter admin logs.
-- [Monitoring and alerts](docs/monitoring.md) lists the alert rules and their prerequisites.
+- [Monitoring and alerts](docs/monitoring.md) lists the alert rules, their prerequisites and what tells you Caddy stopped.
 - [Security](docs/hardening.md) covers running as another user, what the image contains and signature checks.
 - [How docker-caddy is built](docs/how-it-works.md) is for readers who want the build design.
 

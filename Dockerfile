@@ -9,7 +9,7 @@ FROM base AS builder
 COPY LICENSE NOTICE /src/
 COPY licenses/ /src/licenses/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
-# Raises x/net above the v0.59.0 the builder's Caddy v2.11.7 requires (CVE-2026-78669, -78663, -97032, -78660, -78659).
+# Raises x/net above the version the builder's Caddy requires (CVE-2026-78669, -78663, -97032, -78660, -78659).
 # The --with blank-imports http2, a package Caddy already links. Once the builder's Caddy requires this x/net or newer,
 # delete the ARG and the --with: a newer requirement makes xcaddy's go get fail rather than downgrade Caddy.
 # renovate: datasource=go depName=golang.org/x/net
@@ -33,7 +33,9 @@ COPY tests/ /tmp/tests/
 COPY Caddyfile.example /tmp/tests/Caddyfile.example
 COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
 COPY alerts/ /tmp/tests/alerts/
+COPY docs/monitoring.md /tmp/tests/docs/monitoring.md
 COPY compose.yaml /tmp/tests/compose.yaml
+COPY Dockerfile /tmp/tests/Dockerfile
 RUN sh /tmp/tests/smoke.sh
 
 # Asserts the freshly built probe runs on this arch and exits 1 for an unreachable URL: non-zero is what the HEALTHCHECK below rests on, and 1 rather than the 2 Docker's contract reserves.

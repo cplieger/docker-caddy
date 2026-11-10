@@ -1,18 +1,28 @@
 # Monitoring and alerts
 
-This page lists what Caddy emits, the alert rules this repository ships and what each rule needs from your Caddyfile and your collector. It is for operators who run Prometheus, Loki and Alertmanager.
+Caddy reports through its own metrics and its own JSON log, and this repository ships a rule file for each. The metric rules cover the faults Caddy has a series for, and the log rules cover the ones it has none for, so the two files complement each other. This page lists what Caddy emits, what each rule needs from your Caddyfile and your collector, and what tells you Caddy stopped.
+
+## What you get
+
+| You run | You get | You set up |
+| --- | --- | --- |
+| Prometheus, Mimir or VictoriaMetrics, with Alertmanager | The seven metric rules, `CaddyTargetDown` and `CaddyTargetAbsent` among them for a Caddy your scrape cannot reach, and `CaddyAdminAPIStalled` for a reload that hangs | A scrape of Caddy's metrics, `alerts/promql.yaml` with your scrape job in the reachability pair, the Caddyfile options below, and the image's default healthcheck |
+| The same with Loki, as the monitoring guide's full stack runs | All twelve rules | Both files, and the handling in [Rules that report the same fault](#rules-that-report-the-same-fault) |
+| Loki and Alertmanager, no metric store | The five log rules, and no rule for a Caddy that stopped and stayed stopped | `alerts/logql.yaml`, a collector that sets `container`, and an outside probe of your site |
+| Grafana-managed alerting only | The twelve rules, imported into Grafana | A scrape of Caddy's metrics and a log source, the rules re-created in Grafana, and the pairs handled as in [Rules that report the same fault](#rules-that-report-the-same-fault): drop `CaddyCrowdSecLAPIPollFailed` where the bouncer metrics are on, and mute the reload pair with a Grafana inhibition rule (Grafana 13 or later, through its API) or accept two notifications |
+| Docker or Unraid only | Docker health and the restart policy, and no alert | An uptime prober on your site, or something that watches Docker health |
 
 ## What Caddy emits
 
-Caddy serves Prometheus metrics at `/metrics` on its admin API, `http://localhost:2019/metrics` with the examples' `admin localhost:2019`. That address is on the container's loopback, so scrape it from something that shares the container's network namespace, such as a monitoring sidecar. The alternative is the routable `:2020` listener that `Caddyfile.plugins.example` already opens. Both serve the same registry. Keep the admin API enabled, as it is by default.
+Caddy serves Prometheus metrics at `/metrics` on its admin API, `http://localhost:2019/metrics` with the examples' `admin localhost:2019`. That address is on the container's loopback, so scrape it from something that shares the container's network namespace, such as a monitoring sidecar. The alternative is the routable `:2020` listener that `Caddyfile.plugins.example` already opens. Both serve the same registry. Keep the admin API enabled, as it is by default. No dashboard ships with this image. Community dashboards read Caddy's own series, such as [Caddy - Standalone Reverse Proxy](https://grafana.com/grafana/dashboards/25216-caddy/) on grafana.com.
 
 Caddy writes its log as JSON whenever standard error is not an interactive terminal, which is the case in a container. A `| json` stage parses it, and `logger` and `level` are the fields to select on. Caddy's logging library, zap, writes the level in lowercase, so match `level="error"`, never `level="ERROR"`.
 
 ## Alerting
 
-The six PromQL rules in [`alerts/promql.yaml`](../alerts/promql.yaml) go to Prometheus or the Mimir ruler, and the five LogQL rules in [`alerts/logql.yaml`](../alerts/logql.yaml) go to Loki's ruler. [Loading metric alert rules](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#loading-metric-alert-rules) and [Loading an app's alert rules](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#loading-an-apps-alert-rules) show how.
+The seven PromQL rules in [`alerts/promql.yaml`](../alerts/promql.yaml) go to Prometheus or the Mimir ruler, and the five LogQL rules in [`alerts/logql.yaml`](../alerts/logql.yaml) go to Loki's ruler. [Loading metric alert rules](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#loading-metric-alert-rules) and [Loading an app's alert rules](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#loading-an-apps-alert-rules) show how.
 
-The log rules cover conditions with no series a Prometheus ruler can rely on. Caddy registers no series at all for some of them. The others have one only when a Caddyfile option is set, or only for some of their causes. The sections below the table say what each rule needs and how it behaves.
+Load both files. They are complementary, and the log rules cover conditions with no series a Prometheus ruler can rely on. Caddy registers no series at all for some of them. The others have one only when a Caddyfile option is set, or only for some of their causes. The sections below the table say what each rule needs and how it behaves.
 
 | Alert | Fires when | Severity |
 | --- | --- | --- |
@@ -22,26 +32,49 @@ The log rules cover conditions with no series a Prometheus ruler can rely on. Ca
 | `CaddyConfigReloadFailed` | the last config reload was rejected, so the running config is stale | critical |
 | `CaddyHigh5xxRate` | one handler's 5xx share stays above 5% for 10 minutes while the target as a whole carries more than 1 request per second | warning |
 | `CaddyCrowdSecLAPIFailing` | more than half the bouncer's LAPI decision-stream polls failed over 10 minutes, for 5 minutes | warning |
+| `CaddyAdminAPIStalled` | no request to `/config/`, which the image's default healthcheck sends, has completed for 5 minutes, so reloads stop applying | warning |
 | `CaddyCertManagementFailing` | a certificate subject logged a failure and no success within the hour, for 15 minutes | warning |
 | `CaddyCrowdSecLAPIPollFailed` | the bouncer logs more than 2 LAPI errors in 10 minutes, with no Caddyfile option needed | warning |
 | `CaddyConfigWatcherStopped` | an opted-in `--watch` could not read or adapt the config file, so later edits are ignored | critical |
 | `CaddyReloadRejected` | a requested config reload was refused, so the file on disk is not the running config | critical |
 | `CaddyStartupFailed` | Caddy exits during startup, before it serves anything, on a config that fails to load | critical |
 
-Thresholds, `for:` windows and the `severity` labels are starting points. If you scrape more than one instance, add your scrape `job` label to the selectors that read Caddy's own registry, and set it on the reachability pair, which requires it. Change the `container` selector on the log rules to the label your log collector sets. Route by whatever labels your Alertmanager uses.
+Thresholds, `for:` windows and the `severity` labels are starting points. If you scrape more than one instance, add your scrape `job` label to the selectors that read Caddy's own registry, and set it on the reachability pair, which requires it. Change the `container` selector on the log rules to the label your log collector sets.
+
+### Rules that report the same fault
+
+With both files loaded, two pairs of rules can report one fault twice.
+
+- With `enable_caddy_metrics` on, a LAPI outage fires `CaddyCrowdSecLAPIFailing` and `CaddyCrowdSecLAPIPollFailed`. Drop `CaddyCrowdSecLAPIPollFailed` from your copy of `alerts/logql.yaml`, because the metric rule reports the same outage. Keep it where the metrics are off or `disable_streaming` is set, because it is then the only rule that sees the outage.
+- A SIGUSR1 reload of a config that fails to apply fires `CaddyReloadRejected` and `CaddyConfigReloadFailed`. Keep both, because `CaddyReloadRejected` is the only signal for a file that fails to read or adapt. Have your Alertmanager mute `CaddyReloadRejected` while `CaddyConfigReloadFailed` fires.
+
+This inhibition goes in your Alertmanager config. Use Alertmanager v0.34.1 or later, because earlier releases could un-mute an inhibited alert in some cases.
+
+```yaml
+inhibit_rules:
+  - source_matchers:
+      - alertname="CaddyConfigReloadFailed"
+    target_matchers:
+      - alertname="CaddyReloadRejected"
+```
+
+The log rule usually fires first, because `CaddyConfigReloadFailed` waits one minute and a scrape. Its first notification can still go out, and the inhibition stops it repeating.
+
+Both rulers must send to the same Alertmanager, and to the same tenant where it has tenants, such as Mimir's. The log rule carries your collector's `container` label and the metric rule carries your scrape's `job` and `instance`, so the two share no label to list under `equal`. With no `equal`, a failed apply on one Caddy mutes a rejected reload on every Caddy, which is right when you run one. With several, give both alerts a label that names the host, through your scrape config and your log collector, and list it under `equal`.
 
 ### What the PromQL rules need
 
 `CaddyTargetDown` and `CaddyTargetAbsent` read Prometheus's own `up` series rather than Caddy's registry, so no Caddyfile option gives them input. Their `job="caddy"` matcher must name your scrape job. Without it, `up == 0` fires for every unrelated target in your Prometheus. `absent()` takes its labels from equality matchers, so the matcher is also what gives that alert its `job` label.
 
-The other four read Caddy's registry, and their needs differ.
+The other five read Caddy's registry, and their needs differ.
 
 - `CaddyConfigReloadFailed` needs nothing further, because Caddy registers its metric unconditionally.
 - `CaddyHigh5xxRate` needs the `metrics` global option, which registers the per-route HTTP instrumentation it reads. `Caddyfile.plugins.example` sets it, and the comment at that line states the throughput cost Caddy documents for it.
 - `CaddyUpstreamUnhealthy` needs active or passive health checks on your own `reverse_proxy`, because Caddy performs none by default. Caddy registers its metric unconditionally, but without health checks the series stays at 1 and the rule cannot fire. For passive checks, `fail_duration <duration>` is enough. Give it the duration, because the bare option name makes a Caddyfile that fails to adapt. Neither example configures health checks, and `Caddyfile.plugins.example` says so at its `reverse_proxy` line.
+- `CaddyAdminAPIStalled` needs the image's default healthcheck, which sends `GET /config/` to the admin API every 30 seconds. [Admin API stall](#admin-api-stall) says what happens without it.
 - `CaddyCrowdSecLAPIFailing` reads the bouncer's LAPI counters, which need `enable_caddy_metrics` in the `crowdsec` global block. It also needs the default streaming bouncer. With `disable_streaming`, the bouncer makes no decision-stream poll, so both of the rule's `mode="stream"` selectors have no series. `Caddyfile.plugins.example` satisfies both.
 
-`Caddyfile.example` sets none of the three options and opens no `:2020` listener, so with it only `CaddyConfigReloadFailed` has input among the rules that read Caddy's registry.
+`Caddyfile.example` sets none of the three options and opens no `:2020` listener, so with it only `CaddyConfigReloadFailed` and `CaddyAdminAPIStalled` have input among the rules that read Caddy's registry.
 
 ### What the LogQL rules need
 
@@ -112,6 +145,35 @@ The Caddy in this image behaves the second way, and two things follow. The read 
 
 The selector has no `| json` stage. Its first alternative is the plain-text line older versions print, and a `| json` stage would tag that line with a parse error and fail the query. Keeping it lets one rule serve an image on either side of v2.11.5. The second alternative, the JSON record later versions print, is anchored on `"msg":"` to keep it off the reload and watcher records. Those carry the same cause text in their `error` field while Caddy keeps serving.
 
+### Admin API stall
+
+`CaddyAdminAPIStalled` fires when no request to `/config/` on the admin API has completed for 5 minutes. Reading the config waits for the lock a reload holds, so a reload stuck in provisioning blocks every config read, and later reloads queue behind it. Sites keep serving on the old config, and `/metrics` takes no lock and keeps answering, so the scrape stays green.
+
+The rule reads `caddy_admin_http_requests_total{path="/config/"}`, which Caddy counts only when a request's handler returns. The image's default healthcheck sends that request every 30 seconds, so the 5-minute window spans ten probes and one late probe or a slow scrape cannot fire it. Docker also marks the container unhealthy after 3 failed probes, but that notifies nobody.
+
+The rule stays silent in three cases. Caddy creates the counter at its first answered request, so a Caddy no probe has reached has no series. A restart starts the counter again, which the rule reads as a rise. A failed scrape is `CaddyTargetDown`'s.
+
+It depends on the healthcheck's traffic. With `admin off`, another admin address, a runtime that ignores the image's healthcheck, or an override that drops the `/config/` URL, nothing reads `/config/` and the rule stays silent. A request you then send to `/config/` by hand creates the series, and the rule fires 5 minutes later and keeps firing until Caddy restarts. Delete the rule from your copy on such a deployment, or keep the admin URL in your healthcheck as [Check the serving path too](troubleshooting.md#check-the-serving-path-too) shows.
+
+When it fires, ask Caddy which reload holds the lock. The admin API serves a [goroutine dump](https://caddyserver.com/docs/profiling), which lists every running goroutine's call stack, one frame per function call. Like `/metrics`, it takes no lock, so it answers during the stall. The container has no shell or `curl`, so run one in its network namespace:
+
+```sh
+docker run --rm --network container:caddy curlimages/curl -s 'http://localhost:2019/debug/pprof/goroutine?debug=2'
+```
+
+Every reload, and every config change through the admin API, runs through the frame `github.com/caddyserver/caddy/v2.changeConfig`, so search the dump for it. A reload that waits for the lock shows `sync.(*RWMutex).Lock` just above that frame. The one goroutine without that wait holds the lock.
+
+Its frames above `changeConfig` show what it waits on. A stuck provisioning passes through a module's `Provision` frame, such as `github.com/caddyserver/caddy/v2/modules/caddytls.(*TLS).Provision` for a certificate file that never finishes reading. Its frames below `changeConfig` show what started the reload:
+
+- `github.com/caddyserver/caddy/v2/caddyconfig.adminLoad.handleLoad` for a `POST` to `/load`, which `caddy reload` sends
+- `github.com/caddyserver/caddy/v2.trapSignalsPosix` for SIGUSR1
+- `github.com/caddyserver/caddy/v2/cmd.watchConfigFile` for `--watch`
+- `github.com/caddyserver/caddy/v2.handleConfig` for a `POST`, `PUT`, `PATCH` or `DELETE` under `/config/` or `/id/`
+
+The container log's reload lines from around the time the alert started show what was being loaded.
+
+Restore what the stuck reload waits on, such as the file or the service it reads. The reload then finishes on its own, and the reloads queued behind it run in turn. Restarting the container also ends the hang and loads the config file again, so take the cause out of the file first.
+
 ### The 5xx rate
 
 `CaddyHigh5xxRate` computes the 5xx share per handler over a 5-minute rate and fires when it stays above 5% for 10 minutes. It also requires the target as a whole to carry more than 1 observation per second over the same window. That throughput floor is aggregate on purpose, so a handler's bad share pages once the target carries traffic, even when that handler is quiet. A firing alert usually means a failing upstream or a broken route, so compare it with `CaddyUpstreamUnhealthy` and the backend logs.
@@ -124,7 +186,7 @@ The `metrics { per_host }` option adds a `host` label. The expression keeps it a
 
 ### CrowdSec bouncer
 
-Two rules report a LAPI outage. `CaddyCrowdSecLAPIPollFailed` reads the log and needs no Caddyfile option, so it is the detector for a deployment that leaves `enable_caddy_metrics` off or sets `disable_streaming`. Where the metrics are on, `CaddyCrowdSecLAPIFailing` reports the same outage as a rate. With `enable_hard_fails` set, the bouncer logs at FATAL and exits instead, so the container restart is the signal rather than either rule.
+Two rules report a LAPI outage. `CaddyCrowdSecLAPIPollFailed` reads the log and needs no Caddyfile option, so it is the detector for a deployment that leaves `enable_caddy_metrics` off or sets `disable_streaming`. Where the metrics are on, `CaddyCrowdSecLAPIFailing` reports the same outage as a rate. With `enable_hard_fails` set, the bouncer logs at FATAL and exits instead, so the container restart is the signal rather than either rule. With both files loaded and the metrics on, drop the log rule, as [Rules that report the same fault](#rules-that-report-the-same-fault) says.
 
 During an outage the proxy keeps serving and the healthcheck stays green. What the bouncer still enforces depends on its cache. With a warm cache, which is every case except an outage that starts before the first decision-stream response, it keeps enforcing the decisions it already has. It learns no new decision and applies no expiry, so the enforced list ages without notice. With a cold cache it enforces nothing.
 
@@ -138,7 +200,7 @@ A LAPI unreachable from startup is retried after a 10s delay. When the connectio
 
 ### Certificates
 
-No metric covers certificate renewal, because Caddy registers no certificate, ACME or expiry series. The log does, and `CaddyCertManagementFailing` reads it.
+Caddy has no certificate metrics yet. It registers no certificate, ACME or expiry series, and [caddyserver/caddy#1683](https://github.com/caddyserver/caddy/issues/1683) tracks adding them. Until a Caddy release ships them, `CaddyCertManagementFailing` reads the log for failed renewals, and an outside TLS prober covers expiry, as [Knowing the app is alive](#knowing-the-app-is-alive) says.
 
 Certmagic is the library Caddy manages certificates with. The rule fires when certmagic has logged an ERROR for a certificate subject in the last hour, and no `certificate obtained successfully` or `certificate renewed successfully` for that subject, and that has held for 15 minutes. The failures are ERROR lines under `tls.obtain` for a first issuance and `tls.renew` for a renewal, such as `could not get certificate from issuer` and `will retry`. The base `tls` logger adds `job failed` and `initiating certificate management`.
 
@@ -152,6 +214,24 @@ Read the `error` field for the cause. An issuer may have refused the order or be
 
 A retry loop runs for a first issuance, and for a renewal Caddy starts at boot for a certificate that is already due. Inside it, every attempt after the first goes to the ACME issuer's test endpoint when it has one. With the CA left at its default, that is the staging endpoint at `acme-staging-v02.api.letsencrypt.org`, and an explicit `test_ca` sets a different one. An order that succeeds there and is then refused in production ends the retries, so read the `error` field before you check the volume.
 
-On a renewal, the served certificate stays valid until it expires, so the alert fires while HTTPS still works.
+On a renewal, the served certificate stays valid until it expires, so the alert fires while HTTPS still works. A certificate certmagic does not manage logs nothing, and [Knowing the app is alive](#knowing-the-app-is-alive) covers it.
 
-Keep a TLS prober against the served site as well, such as blackbox_exporter's `probe_ssl_earliest_cert_expiry`. It catches the case that logs nothing, a certificate certmagic does not manage. One loaded from files with `tls <cert> <key>` is never renewed and never reported.
+## Knowing the app is alive
+
+The image adds no health route of its own. Caddy's admin API and the sites you configure are its only HTTP surface, so a Caddy that is alive is one whose sites answer.
+
+**What the healthcheck proves.** The image checks itself every 30 seconds with `/probe`, which sends a GET to Caddy's admin API at `http://127.0.0.1:2019/config/` with a 4-second timeout. Docker marks the container unhealthy after 3 failures, and allows 15 seconds after a start. Healthy means Caddy runs and its admin API answers, so a reload that hangs turns it unhealthy while sites keep serving. It does not test your sites. `CaddyAdminAPIStalled` reports the same hang from the probe's own requests.
+
+A Caddy that exits stops the container, and the restart policy reacts, not the healthcheck. [What the healthcheck checks](troubleshooting.md#what-the-healthcheck-checks) has the detail. Docker's health status notifies nobody on its own, and Docker does not restart an unhealthy container.
+
+**Who is told.**
+
+| You run | Caddy stopped | Caddy runs but a site fails |
+| --- | --- | --- |
+| Prometheus with these rules | `CaddyTargetDown`, or `CaddyTargetAbsent` once the target is gone | `CaddyHigh5xxRate` and `CaddyUpstreamUnhealthy`, for the faults they see, and an outside probe |
+| Loki only | `CaddyStartupFailed`, for a config that fails to load, and nothing for one that fails to read or adapt. An outside probe, for a container that stays stopped | An outside probe |
+| Docker or Unraid only | The restart policy, which restarts it and tells nobody, and an uptime prober on your site | An uptime prober on your site |
+
+**Probing from outside.** A probe of the serving path is the one signal every stack has for a Caddy that stopped and stayed stopped. Check a site Caddy serves, with the scheme and name your users open, and pass on status 200 only, without matching the body. Use a 5-second timeout, check every 60 seconds, alert after 3 failures, and wait 15 seconds after a first start. For a fixed route to probe, add `respond /healthz "OK" 200` in an explicit `http://:80` block, as both example Caddyfiles do and [Check the serving path too](troubleshooting.md#check-the-serving-path-too) explains.
+
+Over HTTPS, have the prober check the served certificate's expiry too. It catches the case that logs nothing, a certificate certmagic does not manage. One loaded from files with `tls <cert> <key>` is never renewed and never reported.

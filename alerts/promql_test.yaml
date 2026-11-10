@@ -1,0 +1,238 @@
+# promtool test rules alerts/promql_test.yaml
+rule_files:
+  - promql.yaml
+
+evaluation_interval: 30s
+
+tests:
+  - name: CaddyAdminAPIStalled stays quiet while the healthcheck probe answers every 30s
+    interval: 30s
+    input_series:
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "1+1x40"
+      # One old failed probe: a flat series of its own that the sum over code absorbs.
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/config/", code="400", method="GET"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+
+  - name: CaddyAdminAPIStalled fires once the counter has been flat for the whole window
+    interval: 1m
+    input_series:
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "0+2x10 20x10"
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/metrics", code="200", method="GET"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 13m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: caddy
+              instance: caddy:2020
+              handler: admin
+              path: /config/
+            exp_annotations:
+              summary: "Caddy's admin API is stalled, so reloads no longer apply"
+              description: "No admin API request to /config/ has completed for 5 minutes, so config reads and reloads stop applying while sites keep serving. The image's default healthcheck sends that request. Read the admin API goroutine dump for the reload holding the lock, as the Admin API stall section of docs/monitoring.md shows.\n"
+
+  - name: CaddyAdminAPIStalled stays quiet when the /config/ series never existed
+    interval: 1m
+    input_series:
+      # admin off, a disabled healthcheck or a probe that never reached Caddy: other
+      # admin routes may still have series, flat or not.
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/load", code="200", method="POST"}'
+        values: "1x20"
+      - series: 'caddy_config_last_reload_successful{job="caddy", instance="caddy:2020"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+
+  - name: CaddyAdminAPIStalled stays quiet across a restart that resets the counter
+    interval: 1m
+    input_series:
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="caddy:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "100+2x10 0+2x10"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+
+  - name: CaddyAdminAPIStalled stays quiet while the scrape is down
+    interval: 1m
+    input_series:
+      # Healthy until the scrape fails at 10m: Prometheus marks the series stale.
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="a:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "0+2x9 stale _x10"
+      - series: 'up{job="caddy", instance="a:2020"}'
+        values: "1x9 0x11"
+      # Flat from 10m, then the whole process wedges and the scrape fails at 13m.
+      # The flat samples left in the window would fire the rule on their own.
+      - series: 'caddy_admin_http_requests_total{job="caddy", instance="b:2020", handler="admin", path="/config/", code="200", method="GET"}'
+        values: "0+2x10 20x1 stale _x8"
+      - series: 'up{job="caddy", instance="b:2020"}'
+        values: "1x12 0x8"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CaddyAdminAPIStalled
+        exp_alerts: []
+
+  - name: CaddyTargetDown pages after 15 minutes of failed scrapes
+    interval: 1m
+    input_series:
+      - series: 'up{job="caddy", instance="caddy:2020"}'
+        values: "1 0x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CaddyTargetDown
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: CaddyTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: caddy
+              instance: caddy:2020
+            exp_annotations:
+              summary: "Caddy is not being scraped successfully"
+              description: "Prometheus has not scraped Caddy successfully for 15 minutes, so Caddy is down or unreachable and every Caddy metric rule is blind. Check the container and the network path from the scraper.\n"
+
+  - name: CaddyTargetAbsent pages when no caddy target exists
+    interval: 1m
+    input_series:
+      - series: 'up{job="other", instance="other:9100"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CaddyTargetAbsent
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CaddyTargetAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: caddy
+            exp_annotations:
+              summary: "Caddy has no scrape target at all"
+              description: "No `up{job=\"caddy\"}` series exists, so Caddy is not a configured target. The target or its scrape config is gone, or the `job` matcher does not name your scrape job. Check your scrape config and both reachability rules.\n"
+
+  - name: CaddyUpstreamUnhealthy names the upstream that stays down for 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'caddy_reverse_proxy_upstreams_healthy{job="caddy", instance="caddy:2020", upstream="backend:8080"}'
+        values: "1 0x10"
+      - series: 'caddy_reverse_proxy_upstreams_healthy{job="caddy", instance="caddy:2020", upstream="other:8080"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CaddyUpstreamUnhealthy
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: CaddyUpstreamUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: caddy
+              instance: caddy:2020
+              upstream: backend:8080
+            exp_annotations:
+              summary: "Caddy upstream backend:8080 unhealthy"
+              description: "Caddy has reported backend:8080 as down for more than 5 minutes, so the service behind it is likely failing. Check the backend container.\n"
+
+  - name: CaddyConfigReloadFailed pages a rejected reload after 1 minute
+    interval: 1m
+    input_series:
+      - series: 'caddy_config_last_reload_successful{job="caddy", instance="caddy:2020"}'
+        values: "1 0x5"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: CaddyConfigReloadFailed
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: CaddyConfigReloadFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: caddy
+              instance: caddy:2020
+            exp_annotations:
+              summary: "Caddy config reload failed"
+              description: "Caddy tried to apply a new config and rejected it, so it still serves the previous one. Run `caddy validate` on the config, or read the Caddy log for the error.\n"
+
+  - name: CaddyHigh5xxRate fires per handler only above the throughput floor
+    interval: 1m
+    input_series:
+      # Instance a: 2 req/s served, 0.2 req/s failing, about 9%.
+      - series: 'caddy_http_request_duration_seconds_count{job="caddy", instance="a:2020", server="srv0", handler="reverse_proxy", code="200", method="GET"}'
+        values: "0+120x20"
+      - series: 'caddy_http_request_duration_seconds_count{job="caddy", instance="a:2020", server="srv0", handler="reverse_proxy", code="502", method="GET"}'
+        values: "0+12x20"
+      # Instance b: the same share at 0.5 req/s, under the floor.
+      - series: 'caddy_http_request_duration_seconds_count{job="caddy", instance="b:2020", server="srv0", handler="reverse_proxy", code="200", method="GET"}'
+        values: "0+27x20"
+      - series: 'caddy_http_request_duration_seconds_count{job="caddy", instance="b:2020", server="srv0", handler="reverse_proxy", code="502", method="GET"}'
+        values: "0+3x20"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: CaddyHigh5xxRate
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: CaddyHigh5xxRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: caddy
+              instance: a:2020
+              handler: reverse_proxy
+            exp_annotations:
+              summary: "Caddy 5xx rate >5% on handler reverse_proxy"
+              description: "More than 5% of requests to the reverse_proxy handler returned 5xx for 10 minutes, while Caddy carried over 1 request per second. An upstream is likely failing, or a route is broken. Check CaddyUpstreamUnhealthy and the backend logs.\n"
+
+  - name: CaddyCrowdSecLAPIFailing fires when most stream polls fail for 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'crowdsec_bouncer_lapi_requests_total{job="caddy", instance="caddy:2020", mode="stream"}'
+        values: "0+1x20"
+      - series: 'crowdsec_bouncer_lapi_requests_failures_total{job="caddy", instance="caddy:2020", mode="stream"}'
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CaddyCrowdSecLAPIFailing
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: CaddyCrowdSecLAPIFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: caddy
+              instance: caddy:2020
+              mode: stream
+            exp_annotations:
+              summary: "CrowdSec bouncer cannot reach the LAPI"
+              description: "More than half of the CrowdSec bouncer's LAPI polls have failed for 5 minutes, so it learns no new decisions and enforces at most its cached ones. Check the CrowdSec LAPI and the bouncer's `api_url` and `api_key`.\n"
