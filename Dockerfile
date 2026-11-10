@@ -1,7 +1,7 @@
 # check=error=true
 ARG CADDY_WORKDIR=/srv
 
-FROM caddy:2.11-builder@sha256:3db11aead97f1fdff9c563d0dd8e7fba2e4c7031bef40f3e44fd1982f3e8366b AS base
+FROM caddy:2.11-builder@sha256:da86330f46775cf80844de8fc2c51cd3e9d59fc4946faa715070f9216421f5af AS base
 ENV GOTOOLCHAIN=auto
 
 FROM base AS builder
