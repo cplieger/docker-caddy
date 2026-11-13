@@ -21,12 +21,24 @@ example="$d/Caddyfile.example"
 alerts="$d/alerts"
 [ -d "$alerts" ] || alerts="$d/../alerts"
 
+# Prints every rule file under $1. The promtool fixtures (*_test.yaml) sit beside
+# the rules and name the same metrics in their input series, so reading them
+# would satisfy every selector check below whatever the rules read.
+cat_rules() {
+  for rule_file in "$1"/*.yaml; do
+    case $rule_file in
+      *_test.yaml) ;;
+      *) if [ -f "$rule_file" ]; then cat "$rule_file"; fi ;;
+    esac
+  done
+}
+
 # CaddyStartupFailed's selector is read out of the bundle and run against the
 # binary, so the rule and the output it must match cannot drift apart. grep -E
 # stands in for Loki's RE2 only while the pattern uses syntax both agree on.
 # The backticks are LogQL's raw-string quotes, not a shell expansion.
 # shellcheck disable=SC2016
-startup_re=$(cat "$alerts"/*.yaml 2>/dev/null \
+startup_re=$(cat_rules "$alerts" 2>/dev/null \
   | awk '/^      - alert: CaddyStartupFailed$/ { r = 1 } r && /^        for:/ { exit } r { print }' \
   | sed -n 's/^.*|~ `\(.*\)`.*$/\1/p')
 if [ -z "$startup_re" ]; then
@@ -224,8 +236,8 @@ if ! (
   fi
 
   if start_route_config "$example"; then
-    assert_route_status http://127.0.0.1:80/health 200
-    assert_route_body http://127.0.0.1:80/health OK
+    assert_route_status http://127.0.0.1:80/healthz 200
+    assert_route_body http://127.0.0.1:80/healthz OK
     stop_route_config
   fi
 
@@ -238,8 +250,8 @@ if ! (
     err "FAIL: could not extract the http://:80 block from the plugins example (vacuous control?)"
     route_fail=1
   elif start_route_config "$plugins_health"; then
-    assert_route_status http://127.0.0.1:80/health 200
-    assert_route_body http://127.0.0.1:80/health OK
+    assert_route_status http://127.0.0.1:80/healthz 200
+    assert_route_body http://127.0.0.1:80/healthz OK
     stop_route_config
   fi
 
@@ -263,8 +275,8 @@ if ! (
       err "FAIL: the :80 health block swallowed the automatic redirect with no managed certificate: got $unmanaged_got, want 308 https://foo.example.com/"
       route_fail=1
     fi
-    assert_route_status http://127.0.0.1:80/health 200
-    assert_route_body http://127.0.0.1:80/health OK
+    assert_route_status http://127.0.0.1:80/healthz 200
+    assert_route_body http://127.0.0.1:80/healthz OK
     stop_route_config
   fi
 
@@ -282,8 +294,8 @@ if ! (
       err "FAIL: the plugins example :80 health block swallowed the automatic redirect with no managed certificate: got $plugins_unmanaged_got, want 308 https://foo.example.com/"
       route_fail=1
     fi
-    assert_route_status http://127.0.0.1:80/health 200
-    assert_route_body http://127.0.0.1:80/health OK
+    assert_route_status http://127.0.0.1:80/healthz 200
+    assert_route_body http://127.0.0.1:80/healthz OK
     stop_route_config
   fi
 
@@ -321,7 +333,7 @@ if ! (
   signal_metrics="$signal_dir/metrics"
   # Same idiom as $example above: the build copies the bundle beside this script,
   # a local run reads the committed copy. The bundle is a FOLDER, one file per
-  # expression language, and the assertions below read every file in it rather
+  # expression language, and the assertions below read every rule file in it rather
   # than one filename: a rule moving between promql.yaml and logql.yaml must not
   # change which tokens the bundle selects, and a third language file later is
   # covered with no edit here.
@@ -329,7 +341,7 @@ if ! (
   signal_bundle="$d/alerts"
   [ -d "$signal_bundle" ] || signal_bundle="$d/../alerts"
   signal_alerts="$signal_dir/alerts-bundle.yaml"
-  cat "$signal_bundle"/*.yaml >"$signal_alerts" 2>/dev/null || true
+  cat_rules "$signal_bundle" >"$signal_alerts" 2>/dev/null || true
   if [ ! -s "$signal_alerts" ]; then
     err "FAIL: no alert rule files under $signal_bundle"
     signal_fail=1
@@ -606,6 +618,234 @@ EOF
   exit "$signal_fail"
 ); then
   fail=1
+fi
+
+# A certificate path that is a FIFO blocks the reload in provisioning, with the
+# config lock held, until something opens the FIFO for writing.
+emit_stall_config() {
+  printf '%s\n' '{' '  admin localhost:2019' '}' '' 'https://localhost:8443 {' \
+    "  tls $1 /nonexistent/key.pem" '}'
+}
+
+monitoring="$d/docs/monitoring.md"
+[ -f "$monitoring" ] || monitoring="$d/../docs/monitoring.md"
+
+if ! (
+  admin_dir=$(mktemp -d)
+  trap 'rm -rf "$admin_dir"' EXIT
+  admin_fail=0
+  dockerfile="$d/Dockerfile"
+  [ -f "$dockerfile" ] || dockerfile="$d/../Dockerfile"
+
+  admin_rule=$(cat_rules "$alerts" 2>/dev/null \
+    | awk '/^      - alert: CaddyAdminAPIStalled$/ { r = 1 } r && /^        for:/ { exit } r { print }')
+  admin_path=$(printf '%s\n' "$admin_rule" \
+    | sed -n 's/.*increase(caddy_admin_http_requests_total{path="\([^"]*\)"}\[[0-9]*m\]).*/\1/p')
+  admin_window=$(printf '%s\n' "$admin_rule" \
+    | sed -n 's/.*increase(caddy_admin_http_requests_total{path="[^"]*"}\[\([0-9]*\)m\]).*/\1/p')
+  hc_interval=$(sed -n 's/^HEALTHCHECK .*--interval=\([0-9]*\)s.*/\1/p' "$dockerfile")
+  hc_cmd=$(awk '/^HEALTHCHECK / { h = 1 } h && /CMD \[/ { print; exit }' "$dockerfile")
+  hc_url=$(printf '%s\n' "$hc_cmd" | sed -n 's/.*"\(http:[^"]*\)"\].*/\1/p')
+  hc_timeout=$(printf '%s\n' "$hc_cmd" | sed -n 's/.*"-timeout", "\([0-9]*\)s".*/\1/p')
+  admin_dump_path=$(sed -n "s|.*localhost:2019\(/debug/pprof/[^']*\)'.*|\1|p" "$monitoring" 2>/dev/null)
+  if [ -z "$admin_dump_path" ]; then
+    err "FAIL: could not read the goroutine dump command from $monitoring (Admin API stall passage renamed or reshaped?)"
+    exit 1
+  fi
+  if [ -z "$admin_path" ] || [ -z "$admin_window" ]; then
+    err "FAIL: could not read the CaddyAdminAPIStalled path and window from $alerts (renamed or reshaped?)"
+    exit 1
+  fi
+  if [ -z "$hc_interval" ] || [ -z "$hc_url" ] || [ -z "$hc_timeout" ]; then
+    err "FAIL: could not read the HEALTHCHECK interval, URL and probe timeout from $dockerfile"
+    exit 1
+  fi
+  hc_path="/${hc_url#http://*/}"
+  admin_base=${hc_url%"$hc_path"}
+  if [ "$hc_path" != "$admin_path" ]; then
+    err "FAIL: the HEALTHCHECK probes $hc_path but CaddyAdminAPIStalled counts $admin_path"
+    admin_fail=1
+  fi
+  # The rule fires when no probe lands between the window's first and last
+  # samples, so the window must outlast two probe intervals plus a one-minute
+  # scrape at each edge.
+  if [ $((admin_window * 60)) -lt $((2 * hc_interval + 120)) ]; then
+    err "FAIL: CaddyAdminAPIStalled's ${admin_window}m window is too short for a ${hc_interval}s HEALTHCHECK interval"
+    admin_fail=1
+  fi
+
+  # The sum of the rule's series on the admin /metrics page; empty when the page
+  # did not answer, 0 when the series does not exist.
+  admin_count() {
+    admin_page=$(curl -fsS --max-time 5 "$admin_base/metrics") || return 1
+    printf '%s\n' "$admin_page" | awk -v p="path=\"$admin_path\"" '
+      index($0, "caddy_admin_http_requests_total{") == 1 && index($0, p) { s += $NF }
+      END { print s + 0 }'
+  }
+  # curl stands in for /probe, which this stage does not have: the same GET,
+  # URL and timeout.
+  admin_probe() {
+    curl -fsS -o /dev/null --max-time "$hc_timeout" "$hc_url"
+  }
+  # Reads a goroutine dump (debug=2) on stdin and prints three counts: goroutines
+  # in changeConfig, those without sync.(*RWMutex).Lock just above it (the
+  # holder, by docs/monitoring.md's rule), and holders in caddytls's Provision.
+  admin_holders() {
+    awk '
+      function flush() { if (cc) { n++; if (!w) { h++; if (t) ht++ } } }
+      /^goroutine / { flush(); cc = 0; w = 0; t = 0; prev = "" }
+      index($0, "github.com/caddyserver/caddy/v2/modules/caddytls.(*TLS).Provision(") == 1 { t = 1 }
+      index($0, "github.com/caddyserver/caddy/v2.changeConfig(") == 1 {
+        cc = 1
+        if (index(prev, "sync.(*RWMutex).Lock(") == 1) w = 1
+      }
+      substr($0, 1, 1) != "\t" { prev = $0 }
+      END { flush(); print n + 0, h + 0, ht + 0 }'
+  }
+
+  admin_cfg="$admin_dir/Caddyfile"
+  printf '%s\n' '{' '  admin localhost:2019' '}' >"$admin_cfg"
+  if ! "$caddy" start --adapter caddyfile --config "$admin_cfg" >"$admin_dir/caddy.log" 2>&1; then
+    err 'FAIL: caddy did not start for the admin-stall smoke test'
+    cat "$admin_dir/caddy.log" >&2
+    exit 1
+  fi
+
+  # The counter appears only after the first answered request, so a Caddy the
+  # probe never reached has no series and the rule cannot fire.
+  if ! admin_c0=$(admin_count); then
+    err 'FAIL: the admin /metrics page did not answer'
+    admin_fail=1
+  elif [ "$admin_c0" != 0 ]; then
+    err "FAIL: caddy_admin_http_requests_total{path=\"$admin_path\"} exists before any request to $admin_path"
+    admin_fail=1
+  fi
+  admin_prev=0
+  admin_i=0
+  while [ "$admin_i" -lt 3 ]; do
+    [ "$admin_i" -eq 0 ] || sleep "$hc_interval"
+    if ! admin_probe; then
+      err "FAIL: the HEALTHCHECK's GET $hc_url failed against a healthy Caddy"
+      admin_fail=1
+      break
+    fi
+    admin_now=$(admin_count) || admin_now=
+    if [ "$admin_now" != $((admin_prev + 1)) ]; then
+      err "FAIL: caddy_admin_http_requests_total{path=\"$admin_path\"} read '$admin_now' after probe $((admin_i + 1)), want $((admin_prev + 1))"
+      admin_fail=1
+      break
+    fi
+    admin_prev=$admin_now
+    admin_i=$((admin_i + 1))
+  done
+
+  # The stall: the reload holds the lock, GET /config/ hangs and stops counting,
+  # and /metrics keeps answering. Released by opening the FIFO for writing.
+  admin_fifo="$admin_dir/stall.crt"
+  mkfifo "$admin_fifo"
+  emit_stall_config "$admin_fifo" >"$admin_dir/Caddyfile.stall"
+  timeout 30 "$caddy" reload --adapter caddyfile --config "$admin_dir/Caddyfile.stall" \
+    >"$admin_dir/reload.log" 2>&1 &
+  admin_reload=$!
+  admin_rc=0
+  admin_i=0
+  while [ "$admin_i" -lt 10 ]; do
+    admin_rc=0
+    curl -fsS -o /dev/null --max-time 2 "$hc_url" 2>/dev/null || admin_rc=$?
+    [ "$admin_rc" -eq 28 ] && break
+    admin_i=$((admin_i + 1))
+    sleep 1
+  done
+  if [ "$admin_rc" -ne 28 ]; then
+    err "FAIL: GET $hc_url did not hang while a reload was stuck in provisioning (curl exit $admin_rc, want 28)"
+    admin_fail=1
+  elif ! admin_s1=$(admin_count); then
+    err 'FAIL: the admin /metrics page did not answer during a stuck reload'
+    admin_fail=1
+  else
+    admin_rc=0
+    admin_probe 2>/dev/null || admin_rc=$?
+    if ! admin_s2=$(admin_count); then
+      err 'FAIL: the admin /metrics page did not answer during a stuck reload'
+      admin_fail=1
+    elif [ "$admin_rc" -ne 28 ] || [ "$admin_s2" != "$admin_s1" ]; then
+      err "FAIL: during a stuck reload the probe exited $admin_rc (want 28) and the counter moved from $admin_s1 to $admin_s2 (want no change)"
+      admin_fail=1
+    fi
+  fi
+
+  # docs/monitoring.md's stall steps: the goroutine dump answers under the held
+  # lock, and of a stuck and a queued reload only the stuck one, in caddytls's
+  # Provision, lacks the lock wait.
+  timeout 30 "$caddy" reload --force --adapter caddyfile --config "$admin_cfg" \
+    >"$admin_dir/queued.log" 2>&1 &
+  admin_queued=$!
+  admin_holder=none
+  admin_i=0
+  while [ "$admin_i" -lt 5 ] && [ "$admin_holder" != '2 1 1' ]; do
+    sleep 1
+    if admin_dump=$(curl -fsS --max-time 5 "$admin_base$admin_dump_path"); then
+      admin_holder=$(printf '%s\n' "$admin_dump" | admin_holders)
+    else
+      admin_holder=unanswered
+    fi
+    admin_i=$((admin_i + 1))
+  done
+  if [ "$admin_holder" = unanswered ]; then
+    err 'FAIL: the admin goroutine dump did not answer during a stuck reload'
+    admin_fail=1
+  elif [ "$admin_holder" != '2 1 1' ]; then
+    err "FAIL: the goroutine dump showed changeConfig goroutines, holders and holders in caddytls Provision as '$admin_holder', want '2 1 1'"
+    admin_fail=1
+  fi
+
+  timeout 5 dd if=/dev/null of="$admin_fifo" 2>/dev/null || true
+  if wait "$admin_reload"; then
+    err 'FAIL: the reload with a FIFO certificate succeeded, so the fixture held nothing'
+    admin_fail=1
+  fi
+  if ! wait "$admin_queued"; then
+    err 'FAIL: the reload queued behind the stuck one did not succeed once it was released'
+    cat "$admin_dir/queued.log" >&2
+    admin_fail=1
+  fi
+  if ! admin_probe; then
+    err "FAIL: GET $hc_url did not answer after the stuck reload was released"
+    admin_fail=1
+  fi
+  if ! "$caddy" stop >/dev/null 2>&1; then
+    err 'FAIL: caddy did not stop after the admin-stall smoke test'
+    cat "$admin_dir/caddy.log" >&2
+    admin_fail=1
+  fi
+  exit "$admin_fail"
+); then
+  fail=1
+fi
+
+# The admin-stall passage of docs/monitoring.md quotes goroutine-dump frames.
+# Every backticked span in its frame paragraphs must be a string in this binary,
+# so a Caddy bump that renames one fails here instead of misleading a reader.
+# The backticks are Markdown's code quotes, not a shell expansion.
+# shellcheck disable=SC2016
+reload_spans=$(awk '/^Every reload, and every config change / { r = 1 } r && /^The container log.s reload lines/ { exit } r { print }' \
+  "$monitoring" 2>/dev/null | grep -o '`[^`]*`' | sed 's/^`//; s/`$//')
+caddy_path=$(command -v "$caddy" || true)
+if [ -z "$reload_spans" ]; then
+  err "FAIL: could not read the goroutine-dump frames from $monitoring (Admin API stall passage renamed or reshaped?)"
+  fail=1
+elif [ ! -f "$caddy_path" ]; then
+  err "FAIL: could not resolve the caddy binary '$caddy' to a file"
+  fail=1
+else
+  missing_spans=$(printf '%s\n' "$reload_spans" | while IFS= read -r span; do
+    grep -qF -e "$span" "$caddy_path" || printf '%s\n' "$span"
+  done)
+  if [ -n "$missing_spans" ]; then
+    err "FAIL: docs/monitoring.md quotes goroutine-dump text that $caddy_path does not contain:"
+    printf '%s\n' "$missing_spans" >&2
+    fail=1
+  fi
 fi
 
 [ "$fail" -eq 0 ] && log "caddy smoke: ok"

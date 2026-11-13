@@ -5,7 +5,9 @@
 !Caddyfile.example
 !Caddyfile.plugins.example
 !alerts/
+!docs/monitoring.md
 !compose.yaml
+!Dockerfile
 !tests/
 !LICENSE
 !NOTICE

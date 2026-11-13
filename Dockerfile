@@ -1,7 +1,7 @@
 # check=error=true
 ARG CADDY_WORKDIR=/srv
 
-FROM caddy:2.11-builder@sha256:3db11aead97f1fdff9c563d0dd8e7fba2e4c7031bef40f3e44fd1982f3e8366b AS base
+FROM caddy:2.11-builder@sha256:6350162b3889ca32600b3c699c61572fa0eb3ad6b2a51874f19b158a7df77511 AS base
 ENV GOTOOLCHAIN=auto
 
 FROM base AS builder
@@ -9,7 +9,7 @@ FROM base AS builder
 COPY LICENSE NOTICE /src/
 COPY licenses/ /src/licenses/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
-# Raises x/net above the v0.59.0 the builder's Caddy v2.11.7 requires (CVE-2026-78669, -78663, -97032, -78660, -78659).
+# Raises x/net above the version the builder's Caddy requires (CVE-2026-78669, -78663, -97032, -78660, -78659).
 # The --with blank-imports http2, a package Caddy already links. Once the builder's Caddy requires this x/net or newer,
 # delete the ARG and the --with: a newer requirement makes xcaddy's go get fail rather than downgrade Caddy.
 # renovate: datasource=go depName=golang.org/x/net
@@ -33,25 +33,27 @@ COPY tests/ /tmp/tests/
 COPY Caddyfile.example /tmp/tests/Caddyfile.example
 COPY Caddyfile.plugins.example /tmp/tests/Caddyfile.plugins.example
 COPY alerts/ /tmp/tests/alerts/
+COPY docs/monitoring.md /tmp/tests/docs/monitoring.md
 COPY compose.yaml /tmp/tests/compose.yaml
+COPY Dockerfile /tmp/tests/Dockerfile
 RUN sh /tmp/tests/smoke.sh
 
 # Asserts the freshly built probe runs on this arch and exits 1 for an unreachable URL: non-zero is what the HEALTHCHECK below rests on, and 1 rather than the 2 Docker's contract reserves.
 FROM base AS probe-builder
-# renovate: datasource=go depName=github.com/cplieger/health/probe
-ARG HEALTH_PROBE_VERSION=v1.1.0
+# renovate: datasource=go depName=github.com/cplieger/go/health/v2
+ARG HEALTH_PROBE_VERSION=v2.0.0
 COPY LICENSE NOTICE /src/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
 WORKDIR /src
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
+    CGO_ENABLED=0 GOBIN=/out go install "github.com/cplieger/go/health/v2/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
     && { out=$(/out/probe -timeout 1s http://127.0.0.1:9/ 2>&1); [ "$?" -eq 1 ] || { printf '%s\n' "probe unreachable-contract check failed (want exit 1), output:" "$out" >&2; exit 1; }; } \
     && go mod init docker-caddy >/dev/null 2>&1 \
-    && GOFLAGS=-mod=mod go get "github.com/cplieger/health/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
-    && sh /usr/local/bin/collect-licenses.sh --name docker-caddy github.com/cplieger/health/probe/cmd/probe
+    && GOFLAGS=-mod=mod go get "github.com/cplieger/go/health/v2/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
+    && sh /usr/local/bin/collect-licenses.sh --name docker-caddy github.com/cplieger/go/health/v2/probe/cmd/probe
 
-FROM caddy:2.11@sha256:ce773ec7a742ce15ee6bf2bb5f65882b9e2a4487b10733e6f1484f86e6b5d8bc AS donor
+FROM caddy:2.11@sha256:9c1b76fb701c1f77383d3124d9f626e38bcf83bc1255ed47475d4f2420701d03 AS donor
 
 FROM donor AS donor-contract
 ARG CADDY_WORKDIR
@@ -65,7 +67,7 @@ RUN set -eu; \
     [ "${XDG_DATA_HOME:-}" = /data ] || { printf '%s\n' "donor XDG_DATA_HOME is ${XDG_DATA_HOME:-<unset>}; this Dockerfile clones /data" >&2; exit 1; }; \
     [ "${XDG_CONFIG_HOME:-}" = /config ] || { printf '%s\n' "donor XDG_CONFIG_HOME is ${XDG_CONFIG_HOME:-<unset>}; this Dockerfile clones /config" >&2; exit 1; }
 
-FROM gcr.io/distroless/static-debian13:latest@sha256:448810357cc8e67b7208988abdba0f5ec3d3aebee0a5b13eb624979792cffc0f
+FROM gcr.io/distroless/static-debian13:latest@sha256:1a64f46364620465ef9e9a8f5413757dfdf22695e050bbfd7303eeaf17a59383
 
 COPY --from=donor /etc/caddy /etc/caddy
 COPY --from=donor /usr/share/caddy /usr/share/caddy

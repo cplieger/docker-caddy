@@ -49,10 +49,10 @@
 	metrics /metrics
 }
 
-# /health must live in an explicit `http://:80` block. Caddy redirects port 80 to
-# 443 for HTTPS site blocks, so a /health route inside one would answer 308.
+# /healthz must live in an explicit `http://:80` block. Caddy redirects port 80 to
+# 443 for HTTPS site blocks, so a /healthz route inside one would answer 308.
 http://:80 {
-	respond /health "OK" 200
+	respond /healthz "OK" 200
 }
 
 *.example.com {
