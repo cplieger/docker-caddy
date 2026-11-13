@@ -220,17 +220,17 @@ On a renewal, the served certificate stays valid until it expires, so the alert 
 
 The image adds no health route of its own. Caddy's admin API and the sites you configure are its only HTTP surface, so a Caddy that is alive is one whose sites answer.
 
-**What the healthcheck proves.** The image checks itself every 30 seconds with `/probe`, which sends a GET to Caddy's admin API at `http://127.0.0.1:2019/config/` with a 4-second timeout. Docker marks the container unhealthy after 3 failures, and allows 15 seconds after a start. Healthy means Caddy runs and its admin API answers, so a reload that hangs turns it unhealthy while sites keep serving. It does not test your sites. `CaddyAdminAPIStalled` reports the same hang from the probe's own requests.
+**What healthy means.** Caddy runs and its admin API answers `GET /config/`. Reading the config takes the lock a reload holds, so a reload that hangs turns the container unhealthy while sites keep serving. The check does not test your sites. `CaddyAdminAPIStalled` reports the same hang from the probe's own requests.
 
-A Caddy that exits stops the container, and the restart policy reacts, not the healthcheck. [What the healthcheck checks](troubleshooting.md#what-the-healthcheck-checks) has the detail. Docker's health status notifies nobody on its own, and Docker does not restart an unhealthy container.
+**Docker health.** The image checks itself every 30 seconds with `/probe -timeout 4s http://127.0.0.1:2019/config/`, which asks Caddy's admin API on the container's loopback. Docker marks the container unhealthy after 3 failures, and allows 15 seconds after a start. Docker's health status notifies nobody on its own, and Docker does not restart an unhealthy container. A Caddy that exits stops the container, and the restart policy reacts, not the healthcheck. [What the healthcheck checks](troubleshooting.md#what-the-healthcheck-checks) has the detail.
 
 **Who is told.**
 
-| You run | Caddy stopped | Caddy runs but a site fails |
-| --- | --- | --- |
-| Prometheus with these rules | `CaddyTargetDown`, or `CaddyTargetAbsent` once the target is gone | `CaddyHigh5xxRate` and `CaddyUpstreamUnhealthy`, for the faults they see, and an outside probe |
-| Loki only | `CaddyStartupFailed`, for a config that fails to load, and nothing for one that fails to read or adapt. An outside probe, for a container that stays stopped | An outside probe |
-| Docker or Unraid only | The restart policy, which restarts it and tells nobody, and an uptime prober on your site | An uptime prober on your site |
+| You run | Caddy stopped | A reload hangs | Caddy runs but a site fails |
+| --- | --- | --- | --- |
+| Prometheus with these rules | `CaddyTargetDown`, or `CaddyTargetAbsent` once the target is gone | `CaddyAdminAPIStalled` | `CaddyHigh5xxRate` and `CaddyUpstreamUnhealthy`, for the faults they see, and an outside probe |
+| Loki only | `CaddyStartupFailed`, for a config that fails to load, and nothing for one that fails to read or adapt. An outside probe, for a container that stays stopped | Nothing: Docker health turns unhealthy and tells nobody | An outside probe |
+| Docker or Unraid only | The restart policy, which restarts it and tells nobody, and an uptime prober on your site | Something that watches Docker health | An uptime prober on your site |
 
 **Probing from outside.** A probe of the serving path is the one signal every stack has for a Caddy that stopped and stayed stopped. Check a site Caddy serves, with the scheme and name your users open, and pass on status 200 only, without matching the body. Use a 5-second timeout, check every 60 seconds, alert after 3 failures, and wait 15 seconds after a first start. For a fixed route to probe, add `respond /healthz "OK" 200` in an explicit `http://:80` block, as both example Caddyfiles do and [Check the serving path too](troubleshooting.md#check-the-serving-path-too) explains.
 

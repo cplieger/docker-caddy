@@ -104,7 +104,7 @@ The container runs as root, like the official Caddy image, so it can bind ports 
 
 ## Troubleshooting
 
-Every 30 seconds the healthcheck asks Caddy's admin API at `127.0.0.1:2019` for its config. Healthy means Caddy runs and its admin API answers, so a hung reload turns it unhealthy. The check does not test your sites. `admin off` or another admin address makes it fail while sites still serve. [Troubleshooting](docs/troubleshooting.md) shows how to probe your sites. An unhealthy container notifies nobody. [Knowing the app is alive](docs/monitoring.md#knowing-the-app-is-alive) says what does.
+An unhealthy container means Caddy's admin API stopped answering, most often because a reload hangs while your sites keep serving. [Admin API stall](docs/monitoring.md#admin-api-stall) shows how to find the reload that holds the lock. The check does not test your sites. `admin off` or another admin address makes it fail while sites still serve. [Troubleshooting](docs/troubleshooting.md) shows how to probe your sites.
 
 When Caddy cannot start, the container exits with status 1 and `restart: unless-stopped` starts it again.
 
