@@ -10,8 +10,10 @@ COPY LICENSE NOTICE /src/
 COPY licenses/ /src/licenses/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
 # Each ARG below raises a module above the version Caddy and the plugins require: x/net for CVE-2026-78669, -78663,
-# -97032, -78660 and -78659, x/crypto for GO-2026-5932, and otel sdk/log for CVE-2026-128085 (it raises the otel sdk
-# and trace modules with it). Each --with blank-imports a package Caddy already links. The pins go before the plugins:
+# -97032, -78660 and -78659, x/crypto for GO-2026-5932, otel sdk/log for CVE-2026-128085 (it raises the otel sdk
+# and trace modules with it), and smallstep/certificates for GHSA-mgcc-cww5-fp2q, GHSA-4w3g-jfj2-cw2q and
+# GHSA-vvm8-gf78-28g4 in go-jose v3 (that revision drops go-jose v3, which has no patched version, and raises
+# go.step.sm/crypto to v0.92.0). Each --with blank-imports a package Caddy already links. The pins go before the plugins:
 # xcaddy runs one go get per --with in flag order, so a pin after a plugin that needs more would silently downgrade it.
 # Once the build resolves a module at its ARG's version or newer without the pin (Caddy or a plugin requires it), delete
 # that ARG and its --with. A pin below Caddy's own requirement makes xcaddy's go get fail rather than downgrade Caddy.
@@ -21,6 +23,8 @@ ARG X_NET_VERSION=v0.62.0
 ARG X_CRYPTO_VERSION=v0.59.0
 # renovate: datasource=go depName=go.opentelemetry.io/otel/sdk/log
 ARG OTEL_SDK_LOG_VERSION=v1.47.0
+# renovate: datasource=go depName=github.com/smallstep/certificates
+ARG SMALLSTEP_CERTIFICATES_VERSION=v0.30.3-0.20261105213751-6d5a251fbe01
 # XCADDY_SKIP_CLEANUP keeps the generated build module so its dependency graph can be walked
 # after the build: xcaddy builds outside any module of ours, and the license tree has to
 # come from the module set that actually went into /usr/bin/caddy.
@@ -30,6 +34,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         --with "golang.org/x/net/http2@${X_NET_VERSION}" \
         --with "golang.org/x/crypto/cryptobyte@${X_CRYPTO_VERSION}" \
         --with "go.opentelemetry.io/otel/sdk/log@${OTEL_SDK_LOG_VERSION}" \
+        --with "github.com/smallstep/certificates/authority@${SMALLSTEP_CERTIFICATES_VERSION}" \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
         --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.15.0 \
     && set -- /tmp/buildenv_* && [ "$#" -eq 1 ] && [ -d "$1" ] \
