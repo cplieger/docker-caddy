@@ -1,6 +1,6 @@
 # Plugins
 
-This page explains the two plugins compiled into this image, and how the CrowdSec bouncer behaves when the CrowdSec Local API (LAPI) is down. It is for operators deciding how much to rely on the bouncer. Each plugin's own README has its full set of options.
+This page explains the two plugins compiled into this image. It also shows how the bouncer finds the client address behind another proxy and how it behaves when the CrowdSec Local API (LAPI) is down. It is for operators deciding how much to rely on the bouncer. Each plugin's own README has its full set of options.
 
 ## caddy-dns/cloudflare
 
@@ -13,7 +13,11 @@ This page explains the two plugins compiled into this image, and how the CrowdSe
 
 [caddy-crowdsec-bouncer](https://github.com/hslatman/caddy-crowdsec-bouncer) checks every request against a cached copy of CrowdSec's active decision list and blocks the listed IP addresses. A streaming subscription to the LAPI keeps the cache current, so no request waits on a network round trip. CrowdSec scenarios such as HTTP probes, scrapers and brute-force attempts create the decisions this bouncer enforces at the proxy.
 
-This image builds in the plugin's HTTP handler only. The plugin's AppSec handler and its Layer 4 connection matcher are separate modules, so neither is in this image.
+This image builds in the plugin's HTTP handler only. The plugin's AppSec handler and its Layer 4 connection matcher are separate modules, so neither is in this image. Caddy plugins are compiled into the binary, so adding either one means building your own image from this repository's `Dockerfile` with one more `--with` flag.
+
+### Behind another proxy
+
+The bouncer checks the client address Caddy records for each request. By default that is the address of the direct connection. Behind Cloudflare's proxy or another proxy, that address belongs to the proxy, so the bouncer never checks the visitor's address. Set Caddy's [`trusted_proxies`](https://caddyserver.com/docs/caddyfile/options#trusted-proxies) server option to the proxy's address ranges, and Caddy then reads the client address from the `X-Forwarded-For` header. Caddy's documentation recommends `trusted_proxies_strict` behind Cloudflare too. This image has no module that fetches Cloudflare's address ranges, so copy them from [Cloudflare's IP list](https://www.cloudflare.com/ips/) into `trusted_proxies static`.
 
 ### It only enforces
 
