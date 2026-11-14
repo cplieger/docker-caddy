@@ -9,11 +9,12 @@ FROM base AS builder
 COPY LICENSE NOTICE /src/
 COPY licenses/ /src/licenses/
 COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
-# Each ARG below raises a module above the version the builder's Caddy requires: x/net for CVE-2026-78669, -78663,
+# Each ARG below raises a module above the version Caddy and the plugins require: x/net for CVE-2026-78669, -78663,
 # -97032, -78660 and -78659, x/crypto for GO-2026-5932, and otel sdk/log for CVE-2026-128085 (it raises the otel sdk
-# and trace modules with it). Each --with blank-imports a package Caddy already links. Once the builder's Caddy requires
-# a module at its ARG's version or newer, delete that ARG and its --with: a newer requirement makes xcaddy's go get fail
-# rather than downgrade Caddy.
+# and trace modules with it). Each --with blank-imports a package Caddy already links. The pins go before the plugins:
+# xcaddy runs one go get per --with in flag order, so a pin after a plugin that needs more would silently downgrade it.
+# Once the build resolves a module at its ARG's version or newer without the pin (Caddy or a plugin requires it), delete
+# that ARG and its --with. A pin below Caddy's own requirement makes xcaddy's go get fail rather than downgrade Caddy.
 # renovate: datasource=go depName=golang.org/x/net
 ARG X_NET_VERSION=v0.62.0
 # renovate: datasource=go depName=golang.org/x/crypto
@@ -26,11 +27,11 @@ ARG OTEL_SDK_LOG_VERSION=v1.47.0
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     XCADDY_SKIP_CLEANUP=1 xcaddy build \
-        --with github.com/caddy-dns/cloudflare@v0.2.4 \
-        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.15.0 \
         --with "golang.org/x/net/http2@${X_NET_VERSION}" \
         --with "golang.org/x/crypto/cryptobyte@${X_CRYPTO_VERSION}" \
         --with "go.opentelemetry.io/otel/sdk/log@${OTEL_SDK_LOG_VERSION}" \
+        --with github.com/caddy-dns/cloudflare@v0.2.4 \
+        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.15.0 \
     && set -- /tmp/buildenv_* && [ "$#" -eq 1 ] && [ -d "$1" ] \
     && cp /src/LICENSE /src/NOTICE "$1"/ && cp -r /src/licenses "$1"/ \
     && sh /usr/local/bin/collect-licenses.sh --src "$1" --name docker-caddy . \
