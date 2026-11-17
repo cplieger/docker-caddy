@@ -18,7 +18,7 @@ COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
 # Once the build resolves a module at its ARG's version or newer without the pin (Caddy or a plugin requires it), delete
 # that ARG and its --with. A pin below Caddy's own requirement makes xcaddy's go get fail rather than downgrade Caddy.
 # renovate: datasource=go depName=golang.org/x/net
-ARG X_NET_VERSION=v0.62.0
+ARG X_NET_VERSION=v0.63.0
 # renovate: datasource=go depName=golang.org/x/crypto
 ARG X_CRYPTO_VERSION=v0.59.0
 # renovate: datasource=go depName=go.opentelemetry.io/otel/sdk/log
