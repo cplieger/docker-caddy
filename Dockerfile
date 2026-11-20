@@ -1,7 +1,7 @@
 # check=error=true
 ARG CADDY_WORKDIR=/srv
 
-FROM caddy:2.11-builder@sha256:6350162b3889ca32600b3c699c61572fa0eb3ad6b2a51874f19b158a7df77511 AS base
+FROM caddy:2.11-builder@sha256:aef223d1f943bc12a29a9e0a0a73983aa19a36672daede7507da4201a6b1016a AS base
 ENV GOTOOLCHAIN=auto
 
 FROM base AS builder
@@ -18,7 +18,7 @@ COPY scripts/collect-licenses.sh /usr/local/bin/collect-licenses.sh
 # Once the build resolves a module at its ARG's version or newer without the pin (Caddy or a plugin requires it), delete
 # that ARG and its --with. A pin below Caddy's own requirement makes xcaddy's go get fail rather than downgrade Caddy.
 # renovate: datasource=go depName=golang.org/x/net
-ARG X_NET_VERSION=v0.62.0
+ARG X_NET_VERSION=v0.63.0
 # renovate: datasource=go depName=golang.org/x/crypto
 ARG X_CRYPTO_VERSION=v0.59.0
 # renovate: datasource=go depName=go.opentelemetry.io/otel/sdk/log
@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && GOFLAGS=-mod=mod go get "github.com/cplieger/go/health/v2/probe/cmd/probe@${HEALTH_PROBE_VERSION}" \
     && sh /usr/local/bin/collect-licenses.sh --name docker-caddy github.com/cplieger/go/health/v2/probe/cmd/probe
 
-FROM caddy:2.11@sha256:4e2425f6009577e7c651010f16679c28f7d12df3e7b1914f941a7a3370746b3c AS donor
+FROM caddy:2.11@sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b AS donor
 
 FROM donor AS donor-contract
 ARG CADDY_WORKDIR
