@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         --with "go.opentelemetry.io/otel/sdk/log@${OTEL_SDK_LOG_VERSION}" \
         --with "github.com/smallstep/certificates/authority@${SMALLSTEP_CERTIFICATES_VERSION}" \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
-        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.15.0 \
+        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.15.1 \
     && set -- /tmp/buildenv_* && [ "$#" -eq 1 ] && [ -d "$1" ] \
     && cp /src/LICENSE /src/NOTICE "$1"/ && cp -r /src/licenses "$1"/ \
     && sh /usr/local/bin/collect-licenses.sh --src "$1" --name docker-caddy . \
