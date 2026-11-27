@@ -1,7 +1,7 @@
 # check=error=true
 ARG CADDY_WORKDIR=/srv
 
-FROM caddy:2.11-builder@sha256:aef223d1f943bc12a29a9e0a0a73983aa19a36672daede7507da4201a6b1016a AS base
+FROM caddy:2.11-builder@sha256:cda07fe9d82728c7ac44d844306d435e98131423dc7b114f05a8a8ecfff94707 AS base
 ENV GOTOOLCHAIN=auto
 
 FROM base AS builder
@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         --with "go.opentelemetry.io/otel/sdk/log@${OTEL_SDK_LOG_VERSION}" \
         --with "github.com/smallstep/certificates/authority@${SMALLSTEP_CERTIFICATES_VERSION}" \
         --with github.com/caddy-dns/cloudflare@v0.2.4 \
-        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.15.0 \
+        --with github.com/hslatman/caddy-crowdsec-bouncer/http@v0.15.1 \
     && set -- /tmp/buildenv_* && [ "$#" -eq 1 ] && [ -d "$1" ] \
     && cp /src/LICENSE /src/NOTICE "$1"/ && cp -r /src/licenses "$1"/ \
     && sh /usr/local/bin/collect-licenses.sh --src "$1" --name docker-caddy . \
@@ -81,7 +81,7 @@ RUN set -eu; \
     [ "${XDG_DATA_HOME:-}" = /data ] || { printf '%s\n' "donor XDG_DATA_HOME is ${XDG_DATA_HOME:-<unset>}; this Dockerfile clones /data" >&2; exit 1; }; \
     [ "${XDG_CONFIG_HOME:-}" = /config ] || { printf '%s\n' "donor XDG_CONFIG_HOME is ${XDG_CONFIG_HOME:-<unset>}; this Dockerfile clones /config" >&2; exit 1; }
 
-FROM gcr.io/distroless/static-debian13:latest@sha256:1a64f46364620465ef9e9a8f5413757dfdf22695e050bbfd7303eeaf17a59383
+FROM gcr.io/distroless/static-debian13:latest@sha256:4c2cd1dee442c9a99924a378c7c126fac8fef14771579ef567c3f2bdd7a5122a
 
 COPY --from=donor /etc/caddy /etc/caddy
 COPY --from=donor /usr/share/caddy /usr/share/caddy
